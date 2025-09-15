@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Simple Blackjack</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #2e7d32;
+    color: white;
+    text-align: center;
+    margin: 0;
+    padding: 20px;
+  }
+  #game {
+    max-width: 600px;
+    margin: 0 auto;
+    background: #1b5e20;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 15px black;
+  }
+  h1 {
+    margin-bottom: 10px;
+  }
+  .cards {
+    display: flex;
+    justify-content: center;
+    margin: 10px 0 20px;
+  }
+  .card {
+    background: white;
+    color: black;
+    border-radius: 5px;
+    width: 60px;
+    height: 90px;
+    line-height: 90px;
+    font-weight: bold;
+    font-size: 24px;
+    margin: 0 5px;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+    user-select: none;
+  }
+  button {
+    background: #388e3c;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    margin: 10px 5px;
+    font-size: 16px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  button:hover {
+    background: #2e7d32;
+  }
+  #message {
+    margin-top: 20px;
+    font-size: 20px;
+    min-height: 28px;
+  }
+</style>
+</head>
+<body>
+
+<div id="game">
+  <h1>Blackjack</h1>
+
+  <div>
+    <h2>Dealer's Hand (<span id="dealer-score">0</span>)</h2>
+    <div id="dealer-cards" class="cards"></div>
+  </div>
+
+  <div>
+    <h2>Your Hand (<span id="player-score">0</span>)</h2>
+    <div id="player-cards" class="cards"></div>
+  </div>
+
+  <div>
+    <button id="btn-hit">Hit</button>
+    <button id="btn-stand">Stand</button>
+    <button id="btn-new">New Game</button>
+  </div>
+
+  <div id="message"></div>
+</div>
+
+<script>
+  const suits = ['♠', '♥', '♦', '♣'];
+  const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+  let deck = [];
+  let playerHand = [];
+  let dealerHand = [];
+  let gameOver = false;
+
+  const dealerCardsDiv = document.getElementById('dealer-cards');
+  const playerCardsDiv = document.getElementById('player-cards');
+  const dealerScoreSpan = document.getElementById('dealer-score');
+  const playerScoreSpan = document.getElementById('player-score');
+  const messageDiv = document.getElementById('message');
+
+  const btnHit = document.getElementById('btn-hit');
+  const btnStand = document.getElementById('btn-stand');
+  const btnNew = document.getElementById('btn-new');
+
+  function createDeck() {
+    deck = [];
+    for (let suit of suits) {
+      for (let value of values) {
+        deck.push({suit, value});
+      }
+    }
+  }
+
+  function shuffleDeck() {
+    for (let i = deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+  }
+
+  function getCardValue(card) {
+    if (card.value === 'A') return 11;
+    if (['K', 'Q', 'J'].includes(card.value)) return 10;
+    return parseInt(card.value);
+  }
+
+  function calculateScore(hand) {
+    let score = 0;
+    let aceCount = 0;
+
+    for (const card of hand) {
+      score += getCardValue(card);
+      if (card.value === 'A') aceCount++;
+    }
+
+    while (score > 21 && aceCount > 0) {
+      score -= 10;
+      aceCount--;
+    }
+
+    return score;
+  }
+
+  function renderCards() {
+    dealerCardsDiv.innerHTML = '';
+    playerCardsDiv.innerHTML = '';
+
+    dealerHand.forEach((card, i) => {
+      const cardDiv = document.createElement('div');
+      cardDiv.classList.add('card');
+
+      // Hide dealer's second card if game not over
+      if (i === 1 && !gameOver) {
+        cardDiv.textContent = '?';
+      } else {
+        cardDiv.textContent = card.value + card.suit;
+        if (card.suit === '♥' || card.suit === '♦') {
+          cardDiv.style.color = 'red';
+        } else {
+          cardDiv.style.color = 'black';
+        }
+      }
+      dealerCardsDiv.appendChild(cardDiv);
+    });
+
+    playerHand.forEach(card => {
+      const cardDiv = document.createElement('div');
+      cardDiv.classList.add('card');
+      cardDiv.textContent = card.value + card.suit;
+      if (card.suit === '♥' || card.suit === '♦') {
+        cardDiv.style.color = 'red';
+      } else {
+        cardDiv.style.color = 'black';
+      }
+      playerCardsDiv.appendChild(cardDiv);
+    });
+
+    dealerScoreSpan.textContent = gameOver ? calculateScore(dealerHand) : '?';
+    playerScoreSpan.textContent = calculateScore(playerHand);
+  }
+
+  function dealInitial() {
+    playerHand = [deck.pop(), deck.pop()];
+    dealerHand = [deck.pop(), deck.pop()];
+    gameOver = false;
+    messageDiv.textContent = '';
+    renderCards();
+    btnHit.disabled = false;
+    btnStand.disabled = false;
+  }
+
+  function checkForEnd() {
+    const playerScore = calculateScore(playerHand);
+    if (playerScore > 21) {
+      messageDiv.textContent = 'You busted! Dealer wins.';
+      gameOver = true;
+      renderCards();
+      btnHit.disabled = true;
+      btnStand.disabled = true;
+      return true;
+    }
+    return false;
+  }
+
+  function dealerTurn() {
+    let dealerScore = calculateScore(dealerHand);
+    while (dealerScore < 17) {
+      dealerHand.push(deck.pop());
+      dealerScore = calculateScore(dealerHand);
+    }
+  }
+
+  function determineWinner() {
+    const playerScore = calculateScore(playerHand);
+    const dealerScore = calculateScore(dealerHand);
+
+    if (dealerScore > 21) {
+      messageDiv.textContent = 'Dealer busted! You win!';
+    } else if (playerScore > dealerScore) {
+      messageDiv.textContent = 'You win!';
+    } else if (playerScore < dealerScore) {
+      messageDiv.textContent = 'Dealer wins!';
+    } else {
+      messageDiv.textContent = 'It\'s a tie!';
+    }
+  }
+
+  btnHit.addEventListener('click', () => {
+    if (gameOver) return;
+    playerHand.push(deck.pop());
+    renderCards();
+    checkForEnd();
+  });
+
+  btnStand.addEventListener('click', () => {
+    if (gameOver) return;
+    dealerTurn();
+    gameOver = true;
+    renderCards();
+    determineWinner();
+    btnHit.disabled = true;
+    btnStand.disabled = true;
+  });
+
+  btnNew.addEventListener('click', () => {
+    createDeck();
+    shuffleDeck();
+    dealInitial();
+  });
+
+  // Start the first game automatically
+  createDeck();
+  shuffleDeck();
+  dealInitial();
+
+</script>
+
+</body>
+</html>
