@@ -29,6 +29,7 @@
     justify-content: center;
     margin: 10px 0 20px;
     min-height: 100px;
+    perspective: 800px;
   }
   .card {
     background: white;
@@ -42,34 +43,41 @@
     margin: 0 5px;
     box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
     user-select: none;
-
-    /* Animation setup */
     position: relative;
     transform-style: preserve-3d;
-    transition: transform 0.6s;
     cursor: default;
   }
-  /* Flip card styles */
-  .card.back {
+  /* Card front and back */
+  .card-front, .card-back {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 5px;
+    backface-visibility: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .card-front {
+    background: white;
+    color: black;
+    font-weight: bold;
+    font-size: 24px;
+  }
+  .card-front.red {
+    color: red;
+  }
+  .card-back {
     background: #444;
-    color: transparent;
-    cursor: default;
-  }
-  .card.back::after {
-    content: "?";
     color: black;
     font-size: 40px;
-    position: absolute;
-    top: 20px;
-    left: 18px;
-    transform: rotateY(0deg);
-    backface-visibility: hidden;
   }
-  .card.flipped {
+  .card-back span {
+    user-select: none;
+  }
+  /* Flipped card */
+  .flipped {
     transform: rotateY(180deg);
-  }
-  .card.back.flipped {
-    color: black;
   }
   /* Slide-in animation */
   @keyframes slideIn {
@@ -82,10 +90,9 @@
       transform: translateY(0);
     }
   }
-  .card.slide-in {
+  .slide-in {
     animation: slideIn 0.5s ease forwards;
   }
-
   button {
     background: #388e3c;
     color: white;
@@ -214,57 +221,59 @@
     return score;
   }
 
-  // Animate cards and render them
+  // Create card element with front and back for flipping
+  function createCardElement(card, isHidden = false, delay = 0) {
+    const cardDiv = document.createElement('div');
+    cardDiv.classList.add('card', 'slide-in');
+    cardDiv.style.animationDelay = `${delay}s`;
+
+    const front = document.createElement('div');
+    front.classList.add('card-front');
+    if (card.suit === '♥' || card.suit === '♦') {
+      front.classList.add('red');
+    }
+    front.textContent = card.value + card.suit;
+
+    const back = document.createElement('div');
+    back.classList.add('card-back');
+    back.innerHTML = "<span>?</span>";
+
+    cardDiv.appendChild(front);
+    cardDiv.appendChild(back);
+
+    if (isHidden) {
+      cardDiv.classList.add('flipped');
+    }
+
+    return cardDiv;
+  }
+
   function renderCards() {
     dealerCardsDiv.innerHTML = '';
     playerCardsDiv.innerHTML = '';
 
-    // Dealer cards
     dealerHand.forEach((card, i) => {
-      const cardDiv = document.createElement('div');
-      cardDiv.classList.add('card');
-      cardDiv.classList.add('slide-in');
-
-      if (!gameOver && i === 1) {
-        // Hidden card - flip animation setup
-        cardDiv.classList.add('back');
-      } else {
-        cardDiv.textContent = card.value + card.suit;
-        cardDiv.style.color = (card.suit === '♥' || card.suit === '♦') ? 'red' : 'black';
-      }
-
-      dealerCardsDiv.appendChild(cardDiv);
-
-      // Delay the slide-in animation per card for nicer effect
-      cardDiv.style.animationDelay = (i * 0.1) + 's';
+      // Hide dealer's second card if game not over
+      const isHidden = !gameOver && i === 1;
+      const cardElement = createCardElement(card, isHidden, i * 0.1);
+      dealerCardsDiv.appendChild(cardElement);
     });
 
-    // Player cards
     playerHand.forEach((card, i) => {
-      const cardDiv = document.createElement('div');
-      cardDiv.classList.add('card', 'slide-in');
-      cardDiv.textContent = card.value + card.suit;
-      cardDiv.style.color = (card.suit === '♥' || card.suit === '♦') ? 'red' : 'black';
-      playerCardsDiv.appendChild(cardDiv);
-      cardDiv.style.animationDelay = (i * 0.1) + 's';
+      const cardElement = createCardElement(card, false, i * 0.1);
+      playerCardsDiv.appendChild(cardElement);
     });
 
     dealerScoreSpan.textContent = gameOver ? calculateScore(dealerHand) : '?';
     playerScoreSpan.textContent = calculateScore(playerHand);
   }
 
-  // Flip dealer's hidden card when round ends
   function flipDealerCard() {
-    const dealerCards = dealerCardsDiv.querySelectorAll('.card');
-    if (dealerCards.length < 2) return; // safety check
-
-    const hiddenCard = dealerCards[1];
-    hiddenCard.classList.remove('back');
-    hiddenCard.textContent = dealerHand[1].value + dealerHand[1].suit;
-    hiddenCard.style.color = (dealerHand[1].suit === '♥' || dealerHand[1].suit === '♦') ? 'red' : 'black';
-
-    // Add flipping animation
-    hiddenCard.style.transform = 'rotateY(0deg)';
+    // Flip the hidden dealer card to show front
+    const cards = dealerCardsDiv.querySelectorAll('.card');
+    if(cards.length > 1) {
+      cards[1].classList.remove('flipped');
+    }
   }
 
   function showMessage(text) {
@@ -349,10 +358,10 @@
   }
 
   function determineWinner() {
+    flipDealerCard();
+
     const playerScore = calculateScore(playerHand);
     const dealerScore = calculateScore(dealerHand);
-
-    flipDealerCard();
 
     if (dealerScore > 21) {
       showMessage('Dealer busted! You win!');
