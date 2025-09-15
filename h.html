@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Mini Fortnite 2D - Advanced</title>
+<title>Mini Fortnite 2D - Single Player</title>
 <style>
   body, html {
     margin: 0; padding: 0; overflow: hidden; background: #4e8cff;
@@ -24,7 +24,8 @@
     padding: 8px 12px;
     border-radius: 5px;
     box-shadow: 0 0 10px rgba(0,0,0,0.2);
-    width: 350px;
+    width: 360px;
+    user-select: none;
   }
   #ui div {
     margin-bottom: 6px;
@@ -67,7 +68,7 @@
   <div>Materials:</div>
   <div class="bar"><div id="materialsBar" class="bar-fill bar-fill-materials"></div></div>
   <div id="instructions">
-    Move: WASD | Aim: Mouse | Shoot: Click | Build Wall: B | Remove Wall: R
+    Move: WASD | Aim: Mouse | Shoot: Left Click (Hold) | Build Wall: B | Remove Wall: R | Reload: Q
   </div>
 </div>
 
@@ -94,6 +95,7 @@
     maxMaterials: 100,
     buildCooldown: 0,
     removeCooldown: 0,
+    lastShotTime: 0,
   };
 
   // --- Bullets ---
@@ -125,58 +127,50 @@
   const BUILD_COOLDOWN_TIME = 300; // ms
   const REMOVE_COOLDOWN_TIME = 300; // ms
   const BULLET_SPEED = 10;
+  const FIRE_RATE = 200; // ms
 
   // --- Enemy AI ---
   // Simple pathfinding with wall avoidance (basic)
   function enemyAI(enemy) {
-    // Vector to player
     let dx = player.x - enemy.x;
     let dy = player.y - enemy.y;
     const distToPlayer = Math.hypot(dx, dy);
 
-    // If close to player, attack (damage is handled in main loop)
     if (distToPlayer < enemy.radius + player.radius + 5) {
       enemy.vx = 0;
       enemy.vy = 0;
       return;
     }
 
-    // Normalize direction to player
     let dirX = dx / distToPlayer;
     let dirY = dy / distToPlayer;
 
-    // Check if next step collides with wall, if so try to go around
     let nextX = enemy.x + dirX * enemy.speed;
     let nextY = enemy.y + dirY * enemy.speed;
 
-    if (collidesWithWall(nextX, nextY, enemy.radius)) {
-      // Try to move perpendicular (simple obstacle avoidance)
+    if (collidesWithWall(nextX, enemy.y, enemy.radius)) {
+      // Try perpendicular moves
       let perpX = -dirY;
       let perpY = dirX;
       nextX = enemy.x + perpX * enemy.speed;
       nextY = enemy.y + perpY * enemy.speed;
-      if (collidesWithWall(nextX, nextY, enemy.radius)) {
-        // Try opposite direction
+      if (collidesWithWall(nextX, enemy.y, enemy.radius)) {
         perpX = dirY;
         perpY = -dirX;
         nextX = enemy.x + perpX * enemy.speed;
         nextY = enemy.y + perpY * enemy.speed;
-        if (collidesWithWall(nextX, nextY, enemy.radius)) {
-          // Stuck, don't move
+        if (collidesWithWall(nextX, enemy.y, enemy.radius)) {
           enemy.vx = 0;
           enemy.vy = 0;
           return;
         }
       }
     }
-
     enemy.vx = nextX - enemy.x;
     enemy.vy = nextY - enemy.y;
   }
 
-  // --- Helper functions ---
-
-  // Check if a circle collides with any wall
+  // --- Helpers ---
   function collidesWithWall(cx, cy, radius) {
     for (const wall of walls) {
       if (
@@ -191,22 +185,10 @@
     return false;
   }
 
-  // Check if a rectangle collides with another rectangle
-  function rectIntersect(a, b) {
-    return !(
-      a.x > b.x + b.width ||
-      a.x + a.width < b.x ||
-      a.y > b.y + b.height ||
-      a.y + a.height < b.y
-    );
-  }
-
-  // Check if a wall exists at a grid position
   function wallAtGrid(x, y) {
     return walls.find(wall => wall.gridX === x && wall.gridY === y);
   }
 
-  // Convert canvas coords to grid coords for building placement
   function toGrid(x, y) {
     return {
       x: Math.floor(x / WALL_SIZE),
@@ -220,15 +202,14 @@
   }
 
   function spawnEnemy() {
-    // Spawn away from player and safe zone
     let x, y;
     do {
       x = Math.random() * canvas.width;
       y = Math.random() * canvas.height;
     } while (
       Math.hypot(x - player.x, y - player.y) < 200 ||
-      x < safeZone.x || x > safeZone.x + safeZone.width ||
-      y < safeZone.y || y > safeZone.y + safeZone.height
+      (x > safeZone.x && x < safeZone.x + safeZone.width &&
+       y > safeZone.y && y < safeZone.y + safeZone.height)
     );
 
     enemies.push({
@@ -243,12 +224,11 @@
     });
   }
 
-  // --- Game update ---
+  // --- Update ---
   function update(delta) {
-    // Player move (with collision)
+    // Player movement
     let px = player.x;
     let py = player.y;
-
     if (keys['w']) py -= player.speed;
     if (keys['s']) py += player.speed;
     if (keys['a']) px -= player.speed;
@@ -257,7 +237,7 @@
     if (!collidesWithWall(px, player.y, player.radius)) player.x = px;
     if (!collidesWithWall(player.x, py, player.radius)) player.y = py;
 
-    // Update player angle based on mouse
+    // Player angle
     player.angle = Math.atan2(mousePos.y - player.y, mousePos.x - player.x);
 
     // Update bullets
@@ -266,48 +246,41 @@
       b.x += b.dx;
       b.y += b.dy;
 
-      // Check collision with walls
       if (collidesWithWall(b.x, b.y, b.radius)) {
-        // Remove bullet on impact
         bullets.splice(i, 1);
         continue;
       }
 
-      // Check collision with enemies
+      let hitEnemy = false;
       for (let j = enemies.length - 1; j >= 0; j--) {
         const e = enemies[j];
         const dist = Math.hypot(b.x - e.x, b.y - e.y);
         if (dist < b.radius + e.radius) {
           e.health -= 25;
           bullets.splice(i, 1);
+          hitEnemy = true;
           if (e.health <= 0) {
             enemies.splice(j, 1);
             spawnEnemy();
-            // Drop materials for player
             player.materials = Math.min(player.materials + 10, player.maxMaterials);
           }
           break;
         }
       }
+      if (hitEnemy) continue;
 
-      // Remove bullets off screen
-      if (
-        b.x < 0 || b.x > canvas.width ||
-        b.y < 0 || b.y > canvas.height
-      ) {
+      if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
         bullets.splice(i, 1);
       }
     }
 
-    // Enemy AI & movement
+    // Enemies AI & movement
     enemies.forEach(enemy => {
       enemyAI(enemy);
 
-      // Apply velocity
       let newX = enemy.x + enemy.vx;
       let newY = enemy.y + enemy.vy;
 
-      // Collision with walls
       if (!collidesWithWall(newX, enemy.y, enemy.radius)) enemy.x = newX;
       if (!collidesWithWall(enemy.x, newY, enemy.radius)) enemy.y = newY;
 
@@ -319,7 +292,7 @@
       }
     });
 
-    // Shrink safe zone slowly
+    // Safe zone shrink
     if (safeZone.width > safeZone.minSize) {
       safeZone.x += safeZone.shrinkRate;
       safeZone.y += safeZone.shrinkRate;
@@ -327,7 +300,7 @@
       safeZone.height -= safeZone.shrinkRate * 2;
     }
 
-    // Damage player if outside safe zone
+    // Damage player outside safe zone
     if (
       player.x < safeZone.x || player.x > safeZone.x + safeZone.width ||
       player.y < safeZone.y || player.y > safeZone.y + safeZone.height
@@ -336,24 +309,24 @@
       if (player.health < 0) player.health = 0;
     }
 
-    // Build & remove cooldowns
+    // Cooldowns
     player.buildCooldown = Math.max(0, player.buildCooldown - delta);
     player.removeCooldown = Math.max(0, player.removeCooldown - delta);
 
-    // Update UI bars
+    // Update UI
     updateUI();
   }
 
-  // --- Draw everything ---
+  // --- Draw ---
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw safe zone
+    // Safe zone
     ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
     ctx.lineWidth = 4;
     ctx.strokeRect(safeZone.x, safeZone.y, safeZone.width, safeZone.height);
 
-    // Draw walls
+    // Walls
     walls.forEach(wall => {
       ctx.fillStyle = '#654321';
       ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
@@ -361,14 +334,13 @@
       ctx.strokeRect(wall.x, wall.y, wall.width, wall.height);
     });
 
-    // Draw player
-    // Body
+    // Player
     ctx.fillStyle = player.color;
     ctx.beginPath();
     ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Gun direction
+    // Gun
     ctx.strokeStyle = 'black';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -376,7 +348,7 @@
     ctx.lineTo(player.x + Math.cos(player.angle) * player.radius * 2, player.y + Math.sin(player.angle) * player.radius * 2);
     ctx.stroke();
 
-    // Draw bullets
+    // Bullets
     bullets.forEach(b => {
       ctx.fillStyle = b.color;
       ctx.beginPath();
@@ -384,61 +356,75 @@
       ctx.fill();
     });
 
-    // Draw enemies
+    // Enemies
     enemies.forEach(e => {
       ctx.fillStyle = e.color;
       ctx.beginPath();
       ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
       ctx.fill();
+
+      // Health bar above enemy
+      ctx.fillStyle = 'red';
+      ctx.fillRect(e.x - e.radius, e.y - e.radius - 10, e.radius * 2, 5);
+      ctx.fillStyle = 'green';
+      ctx.fillRect(e.x - e.radius, e.y - e.radius - 10, (e.health / 50) * e.radius * 2, 5);
     });
 
-    // Draw health text over player
+    // Player health text
     ctx.fillStyle = 'white';
     ctx.font = '12px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(`HP: ${Math.floor(player.health)}`, player.x, player.y - player.radius - 8);
+    ctx.fillText(`HP: ${Math.floor(player.health)}`, player.x, player.y + player.radius + 15);
 
-    // Draw safe zone text
-    ctx.fillStyle = 'rgba(0, 255, 255, 0.7)';
-    ctx.font = '16px Arial';
-    ctx.fillText('Safe Zone', safeZone.x + safeZone.width / 2, safeZone.y - 10);
+    // Game Over screen
+    if (player.health <= 0) {
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'white';
+      ctx.font = '60px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2);
+      ctx.font = '24px Arial';
+      ctx.fillText('Refresh page to play again', canvas.width / 2, canvas.height / 2 + 40);
+    }
   }
 
-  // --- UI update ---
-  function updateUI() {
-    const healthBar = document.getElementById('healthBar');
-    const ammoBar = document.getElementById('ammoBar');
-    const materialsBar = document.getElementById('materialsBar');
+  // --- Shoot ---
+  function tryShoot() {
+    if (player.ammo <= 0 || player.health <= 0) return;
 
-    healthBar.style.width = `${(player.health / player.maxHealth) * 100}%`;
-    ammoBar.style.width = `${(player.ammo / player.maxAmmo) * 100}%`;
-    materialsBar.style.width = `${(player.materials / player.maxMaterials) * 100}%`;
+    const now = performance.now();
+    if (now - player.lastShotTime < FIRE_RATE) return;
+
+    player.lastShotTime = now;
+
+    const bulletDx = Math.cos(player.angle) * BULLET_SPEED;
+    const bulletDy = Math.sin(player.angle) * BULLET_SPEED;
+
+    bullets.push({
+      x: player.x + Math.cos(player.angle) * player.radius,
+      y: player.y + Math.sin(player.angle) * player.radius,
+      dx: bulletDx,
+      dy: bulletDy,
+      radius: 5,
+      color: 'black',
+    });
+
+    player.ammo--;
   }
 
   // --- Build Wall ---
   function tryBuildWall() {
-    if (player.materials < 10) return; // Not enough materials
-    if (player.buildCooldown > 0) return;
+    if (player.buildCooldown > 0 || player.materials < 10 || player.health <= 0) return;
 
     const grid = toGrid(mousePos.x, mousePos.y);
 
-    // Don't build outside canvas
     if (grid.x < 0 || grid.y < 0) return;
-    if (grid.x * WALL_SIZE > canvas.width - WALL_SIZE) return;
-    if (grid.y * WALL_SIZE > canvas.height - WALL_SIZE) return;
+    if (grid.x * WALL_SIZE > canvas.width - WALL_SIZE || grid.y * WALL_SIZE > canvas.height - WALL_SIZE) return;
 
-    // Don't build inside safe zone? (Optional: let them build)
-    // if (
-    //   grid.x * WALL_SIZE > safeZone.x &&
-    //   grid.x * WALL_SIZE < safeZone.x + safeZone.width &&
-    //   grid.y * WALL_SIZE > safeZone.y &&
-    //   grid.y * WALL_SIZE < safeZone.y + safeZone.height
-    // ) return;
+    if (wallAtGrid(grid.x, grid.y)) return; // Already wall
 
-    // Check if wall already exists here
-    if (wallAtGrid(grid.x, grid.y)) return;
-
-    // Create wall
+    // Build wall
     walls.push({
       x: grid.x * WALL_SIZE,
       y: grid.y * WALL_SIZE,
@@ -454,7 +440,7 @@
 
   // --- Remove Wall ---
   function tryRemoveWall() {
-    if (player.removeCooldown > 0) return;
+    if (player.removeCooldown > 0 || player.health <= 0) return;
 
     const grid = toGrid(mousePos.x, mousePos.y);
     const wall = wallAtGrid(grid.x, grid.y);
@@ -464,37 +450,30 @@
     const index = walls.indexOf(wall);
     if (index !== -1) {
       walls.splice(index, 1);
-      // Give some materials back
       player.materials = Math.min(player.materials + 5, player.maxMaterials);
       player.removeCooldown = REMOVE_COOLDOWN_TIME;
     }
   }
 
-  // --- Shooting ---
-  function tryShoot() {
-    if (player.ammo <= 0) return;
-
-    // Spawn bullet at player position towards angle
-    bullets.push({
-      x: player.x + Math.cos(player.angle) * player.radius,
-      y: player.y + Math.sin(player.angle) * player.radius,
-      radius: 5,
-      dx: Math.cos(player.angle) * BULLET_SPEED,
-      dy: Math.sin(player.angle) * BULLET_SPEED,
-      color: 'black',
-    });
-
-    player.ammo--;
-  }
-
   // --- Reload ---
-  function reloadAmmo() {
-    // Simple reload that refills ammo slowly (or instantly for simplicity)
+  function reload() {
+    if (player.health <= 0) return;
     player.ammo = player.maxAmmo;
   }
 
-  // --- Input Listeners ---
-  document.addEventListener('keydown', e => {
+  // --- UI ---
+  const healthBar = document.getElementById('healthBar');
+  const ammoBar = document.getElementById('ammoBar');
+  const materialsBar = document.getElementById('materialsBar');
+
+  function updateUI() {
+    healthBar.style.width = (player.health / player.maxHealth) * 100 + '%';
+    ammoBar.style.width = (player.ammo / player.maxAmmo) * 100 + '%';
+    materialsBar.style.width = (player.materials / player.maxMaterials) * 100 + '%';
+  }
+
+  // --- Input Handlers ---
+  window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true;
 
     if (e.key.toLowerCase() === 'b') {
@@ -504,11 +483,11 @@
       tryRemoveWall();
     }
     if (e.key.toLowerCase() === 'q') {
-      reloadAmmo();
+      reload();
     }
   });
 
-  document.addEventListener('keyup', e => {
+  window.addEventListener('keyup', e => {
     keys[e.key.toLowerCase()] = false;
   });
 
@@ -531,38 +510,26 @@
     }
   });
 
-  // --- Game loop ---
-  let lastTime = 0;
-  function gameLoop(time = 0) {
-    let delta = time - lastTime;
+  // --- Main Loop ---
+  let lastTime = performance.now();
+  function gameLoop(time = performance.now()) {
+    const delta = time - lastTime;
     lastTime = time;
 
-    update(delta);
-    draw();
+    if (player.health > 0) {
+      update(delta);
 
-    // If mouse is down, shoot repeatedly but capped by ammo
-    if (mouseDown && player.ammo > 0) {
-      // Simple fire rate control - shoot every ~200ms
-      if (!player.lastShotTime || time - player.lastShotTime > 200) {
+      if (mouseDown) {
         tryShoot();
-        player.lastShotTime = time;
       }
     }
 
-    // Game over?
-    if (player.health <= 0) {
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'white';
-      ctx.font = '48px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2);
-      return;
-    }
-
+    draw();
     requestAnimationFrame(gameLoop);
   }
 
+  // Start game loop
+  updateUI();
   requestAnimationFrame(gameLoop);
 })();
 </script>
