@@ -3,505 +3,235 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Multiplayer Blackjack</title>
+<title>Mini Fortnite 2D</title>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    background: #2e7d32;
-    color: white;
-    text-align: center;
-    margin: 0;
-    padding: 20px;
+  body, html {
+    margin: 0; padding: 0; overflow: hidden; background: #4e8cff;
   }
-  #game {
-    max-width: 700px;
+  canvas {
+    display: block;
     margin: 0 auto;
-    background: #1b5e20;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 0 15px black;
+    background: #7ec850;
+    border: 2px solid #333;
   }
-  h1 {
-    margin-bottom: 10px;
-  }
-  .cards {
-    display: flex;
-    justify-content: center;
-    margin: 10px 0 20px;
-    min-height: 100px;
-    perspective: 800px;
-  }
-  .card {
-    background: white;
-    color: black;
+  #info {
+    position: fixed;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    font-family: Arial, sans-serif;
+    background: rgba(255,255,255,0.8);
+    padding: 5px 10px;
     border-radius: 5px;
-    width: 60px;
-    height: 90px;
-    line-height: 90px;
-    font-weight: bold;
-    font-size: 24px;
-    margin: 0 5px;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
     user-select: none;
-    position: relative;
-    transform-style: preserve-3d;
-    cursor: default;
-  }
-  .card-front, .card-back {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 5px;
-    backface-visibility: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-  .card-front {
-    background: white;
-    color: black;
-    font-weight: bold;
-    font-size: 24px;
-  }
-  .card-front.red {
-    color: red;
-  }
-  .card-back {
-    background: #444;
-    color: black;
-    font-size: 40px;
-  }
-  .card-back span {
-    user-select: none;
-  }
-  .flipped {
-    transform: rotateY(180deg);
-  }
-  @keyframes slideIn {
-    from {
-      opacity: 0;
-      transform: translateY(-40px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  .slide-in {
-    animation: slideIn 0.5s ease forwards;
-  }
-  button {
-    background: #388e3c;
-    color: white;
-    border: none;
-    padding: 12px 24px;
-    margin: 10px 5px;
-    font-size: 16px;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: transform 0.2s ease;
-  }
-  button:hover:not(:disabled) {
-    background: #2e7d32;
-    transform: scale(1.05);
-  }
-  button:disabled {
-    background: #555;
-    cursor: not-allowed;
-  }
-  #message {
-    margin-top: 20px;
-    font-size: 20px;
-    min-height: 28px;
-    opacity: 0;
-    transition: opacity 0.7s ease;
-  }
-  #message.visible {
-    opacity: 1;
-  }
-  #status {
-    margin-bottom: 15px;
-    font-size: 18px;
-  }
-  .player-section {
-    border: 2px solid #4caf50;
-    border-radius: 10px;
-    padding: 10px;
-    margin-bottom: 15px;
-    background: #2e7d32;
-  }
-  .active-player {
-    border-color: #ffeb3b;
-    background: #558b2f;
-  }
-  #player-count-input {
-    font-size: 16px;
-    padding: 5px;
-    width: 60px;
-    margin-right: 10px;
   }
 </style>
 </head>
 <body>
 
-<div id="game">
-  <h1>Multiplayer Blackjack</h1>
-
-  <div>
-    <label for="player-count-input">Number of Players (2-4): </label>
-    <input id="player-count-input" type="number" min="2" max="4" value="2" />
-    <button id="btn-start">Start Game</button>
-  </div>
-
-  <div id="status" style="margin-top:15px;">
-    <div>Round: <span id="round">1</span></div>
-    <div id="turn-info" style="margin-top:10px; font-weight: bold;">Waiting to start...</div>
-  </div>
-
-  <div id="players-container" style="margin-top:20px;"></div>
-
-  <div>
-    <h2>Dealer's Hand (<span id="dealer-score">?</span>)</h2>
-    <div id="dealer-cards" class="cards"></div>
-  </div>
-
-  <div>
-    <button id="btn-hit" disabled>Hit</button>
-    <button id="btn-stand" disabled>Stand</button>
-    <button id="btn-next" disabled>Next Turn</button>
-    <button id="btn-reset" disabled>Reset Game</button>
-  </div>
-
-  <div id="message"></div>
-</div>
+<div id="info">Use WASD to move, mouse to aim and shoot. Survive inside the shrinking safe zone!</div>
+<canvas id="game" width="800" height="600"></canvas>
 
 <script>
-  const suits = ['♠', '♥', '♦', '♣'];
-  const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
 
-  let deck = [];
-  let dealerHand = [];
-  let players = []; // Array of player objects {hand: [], points: 0, busted: false, stood: false}
-  let currentPlayerIndex = 0;
-  let round = 1;
-  let gameStarted = false;
-  let dealerDone = false;
+const player = {
+  x: canvas.width / 2,
+  y: canvas.height / 2,
+  radius: 15,
+  speed: 3,
+  color: 'blue',
+  health: 100,
+  angle: 0,
+};
 
-  const dealerCardsDiv = document.getElementById('dealer-cards');
-  const dealerScoreSpan = document.getElementById('dealer-score');
-  const playersContainer = document.getElementById('players-container');
-  const roundSpan = document.getElementById('round');
-  const turnInfoDiv = document.getElementById('turn-info');
-  const messageDiv = document.getElementById('message');
+const bullets = [];
+const enemies = [];
+const keys = {};
 
-  const btnHit = document.getElementById('btn-hit');
-  const btnStand = document.getElementById('btn-stand');
-  const btnNext = document.getElementById('btn-next');
-  const btnReset = document.getElementById('btn-reset');
-  const btnStart = document.getElementById('btn-start');
-  const playerCountInput = document.getElementById('player-count-input');
+const safeZone = {
+  x: 100,
+  y: 100,
+  width: 600,
+  height: 400,
+  shrinkRate: 0.05,
+  minSize: 100,
+};
 
-  function createDeck() {
-    deck = [];
-    for (let suit of suits) {
-      for (let value of values) {
-        deck.push({ suit, value });
+function spawnEnemy() {
+  const enemy = {
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    radius: 12,
+    speed: 1.5,
+    color: 'red',
+    health: 30,
+  };
+  enemies.push(enemy);
+}
+
+for (let i = 0; i < 5; i++) {
+  spawnEnemy();
+}
+
+// Input Handling
+document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  player.angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+});
+
+canvas.addEventListener('click', e => {
+  // Shoot bullet
+  bullets.push({
+    x: player.x + Math.cos(player.angle) * player.radius,
+    y: player.y + Math.sin(player.angle) * player.radius,
+    radius: 5,
+    speed: 7,
+    dx: Math.cos(player.angle) * 7,
+    dy: Math.sin(player.angle) * 7,
+    color: 'black',
+  });
+});
+
+function update() {
+  // Move player
+  if (keys['w'] && player.y - player.radius > 0) player.y -= player.speed;
+  if (keys['s'] && player.y + player.radius < canvas.height) player.y += player.speed;
+  if (keys['a'] && player.x - player.radius > 0) player.x -= player.speed;
+  if (keys['d'] && player.x + player.radius < canvas.width) player.x += player.speed;
+
+  // Update bullets
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.dx;
+    b.y += b.dy;
+
+    // Remove bullets off screen
+    if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+      bullets.splice(i, 1);
+      continue;
+    }
+
+    // Check collision with enemies
+    for (let j = enemies.length - 1; j >= 0; j--) {
+      const e = enemies[j];
+      const dist = Math.hypot(b.x - e.x, b.y - e.y);
+      if (dist < b.radius + e.radius) {
+        e.health -= 20;
+        bullets.splice(i, 1);
+        if (e.health <= 0) {
+          enemies.splice(j, 1);
+          spawnEnemy();
+        }
+        break;
       }
     }
   }
 
-  function shuffleDeck() {
-    for (let i = deck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [deck[i], deck[j]] = [deck[j], deck[i]];
+  // Move enemies toward player
+  enemies.forEach(e => {
+    const angle = Math.atan2(player.y - e.y, player.x - e.x);
+    e.x += Math.cos(angle) * e.speed;
+    e.y += Math.sin(angle) * e.speed;
+
+    // Enemy damage player on collision
+    const dist = Math.hypot(e.x - player.x, e.y - player.y);
+    if (dist < e.radius + player.radius) {
+      player.health -= 0.5;
+      if (player.health < 0) player.health = 0;
     }
-  }
-
-  function getCardValue(card) {
-    if (card.value === 'A') return 11;
-    if (['K', 'Q', 'J'].includes(card.value)) return 10;
-    return parseInt(card.value);
-  }
-
-  function calculateScore(hand) {
-    let score = 0;
-    let aceCount = 0;
-
-    for (const card of hand) {
-      score += getCardValue(card);
-      if (card.value === 'A') aceCount++;
-    }
-
-    while (score > 21 && aceCount > 0) {
-      score -= 10;
-      aceCount--;
-    }
-
-    return score;
-  }
-
-  function createCardElement(card, isHidden = false, delay = 0) {
-    const cardDiv = document.createElement('div');
-    cardDiv.classList.add('card', 'slide-in');
-    cardDiv.style.animationDelay = `${delay}s`;
-
-    const front = document.createElement('div');
-    front.classList.add('card-front');
-    if (card.suit === '♥' || card.suit === '♦') {
-      front.classList.add('red');
-    }
-    front.textContent = card.value + card.suit;
-
-    const back = document.createElement('div');
-    back.classList.add('card-back');
-    back.innerHTML = "<span>?</span>";
-
-    cardDiv.appendChild(front);
-    cardDiv.appendChild(back);
-
-    if (isHidden) {
-      cardDiv.classList.add('flipped');
-    }
-
-    return cardDiv;
-  }
-
-  function renderDealerCards() {
-    dealerCardsDiv.innerHTML = '';
-    dealerHand.forEach((card, i) => {
-      const isHidden = !dealerDone && i === 1;
-      const cardElement = createCardElement(card, isHidden, i * 0.1);
-      dealerCardsDiv.appendChild(cardElement);
-    });
-    dealerScoreSpan.textContent = dealerDone ? calculateScore(dealerHand) : '?';
-  }
-
-  function renderPlayers() {
-    playersContainer.innerHTML = '';
-    players.forEach((player, i) => {
-      const playerDiv = document.createElement('div');
-      playerDiv.classList.add('player-section');
-      if (i === currentPlayerIndex && !dealerDone) {
-        playerDiv.classList.add('active-player');
-      }
-      const score = calculateScore(player.hand);
-      const busted = player.busted ? ' (Busted)' : '';
-      const stood = player.stood ? ' (Stood)' : '';
-
-      playerDiv.innerHTML = `<h3>Player ${i + 1} ${busted}${stood}</h3>
-        <div>Points: ${player.points}</div>
-        <div>Score: ${score > 21 ? 'Bust' : score}</div>
-        <div class="cards"></div>`;
-
-      const cardsDiv = playerDiv.querySelector('.cards');
-      player.hand.forEach((card, idx) => {
-        const cardEl = createCardElement(card, false, idx * 0.1);
-        cardsDiv.appendChild(cardEl);
-      });
-
-      playersContainer.appendChild(playerDiv);
-    });
-  }
-
-  function showMessage(text) {
-    messageDiv.textContent = text;
-    messageDiv.classList.add('visible');
-  }
-
-  function clearMessage() {
-    messageDiv.textContent = '';
-    messageDiv.classList.remove('visible');
-  }
-
-  function dealInitialCards() {
-    if (deck.length < 20) {
-      createDeck();
-      shuffleDeck();
-    }
-    dealerHand = [deck.pop(), deck.pop()];
-    players.forEach(p => {
-      p.hand = [deck.pop(), deck.pop()];
-      p.busted = false;
-      p.stood = false;
-    });
-    dealerDone = false;
-    currentPlayerIndex = 0;
-    roundSpan.textContent = round;
-    clearMessage();
-    renderDealerCards();
-    renderPlayers();
-    updateTurnInfo();
-    updateButtons();
-  }
-
-  function updateTurnInfo() {
-    if (!gameStarted) {
-      turnInfoDiv.textContent = "Click Start Game";
-    } else if (!dealerDone) {
-      turnInfoDiv.textContent = `Player ${currentPlayerIndex + 1}'s Turn`;
-    } else {
-      turnInfoDiv.textContent = `Dealer's Turn - Round Over`;
-    }
-  }
-
-  function updateButtons() {
-    if (!gameStarted) {
-      btnHit.disabled = true;
-      btnStand.disabled = true;
-      btnNext.disabled = true;
-      btnReset.disabled = true;
-      return;
-    }
-    btnReset.disabled = false;
-
-    if (dealerDone) {
-      btnHit.disabled = true;
-      btnStand.disabled = true;
-      btnNext.disabled = true;
-      return;
-    }
-
-    const current = players[currentPlayerIndex];
-    if (current.busted || current.stood) {
-      btnHit.disabled = true;
-      btnStand.disabled = true;
-      btnNext.disabled = false;
-    } else {
-      btnHit.disabled = false;
-      btnStand.disabled = false;
-      btnNext.disabled = true;
-    }
-  }
-
-  function playerHit() {
-    const player = players[currentPlayerIndex];
-    player.hand.push(deck.pop());
-    const score = calculateScore(player.hand);
-    if (score > 21) {
-      player.busted = true;
-      showMessage(`Player ${currentPlayerIndex + 1} busted!`);
-      btnHit.disabled = true;
-      btnStand.disabled = true;
-      btnNext.disabled = false;
-    }
-    renderPlayers();
-  }
-
-  function playerStand() {
-    const player = players[currentPlayerIndex];
-    player.stood = true;
-    showMessage(`Player ${currentPlayerIndex + 1} stands.`);
-    btnHit.disabled = true;
-    btnStand.disabled = true;
-    btnNext.disabled = false;
-  }
-
-  function nextTurn() {
-    clearMessage();
-    currentPlayerIndex++;
-    if (currentPlayerIndex >= players.length) {
-      dealerTurn();
-    } else {
-      updateTurnInfo();
-      updateButtons();
-      renderPlayers();
-    }
-  }
-
-  function dealerTurn() {
-    dealerDone = true;
-    showMessage("Dealer's turn...");
-    renderDealerCards();
-
-    let dealerScore = calculateScore(dealerHand);
-    while (dealerScore < 17) {
-      dealerHand.push(deck.pop());
-      dealerScore = calculateScore(dealerHand);
-    }
-
-    renderDealerCards();
-    setTimeout(determineWinners, 1000);
-  }
-
-  function determineWinners() {
-    const dealerScore = calculateScore(dealerHand);
-    let resultMessage = "";
-    players.forEach((player, i) => {
-      const score = calculateScore(player.hand);
-      if (player.busted) {
-        resultMessage += `Player ${i + 1} busted and loses.<br>`;
-      } else if (dealerScore > 21) {
-        resultMessage += `Dealer busted. Player ${i + 1} wins!<br>`;
-        player.points++;
-      } else if (score > dealerScore) {
-        resultMessage += `Player ${i + 1} wins!<br>`;
-        player.points++;
-      } else if (score < dealerScore) {
-        resultMessage += `Player ${i + 1} loses.<br>`;
-      } else {
-        resultMessage += `Player ${i + 1} ties with dealer.<br>`;
-      }
-    });
-    showMessage(resultMessage);
-    round++;
-    roundSpan.textContent = round;
-    updateTurnInfo();
-    updateButtons();
-    renderPlayers();
-  }
-
-  btnHit.addEventListener('click', () => {
-    playerHit();
   });
 
-  btnStand.addEventListener('click', () => {
-    playerStand();
+  // Shrink safe zone
+  if (safeZone.width > safeZone.minSize) {
+    safeZone.x += safeZone.shrinkRate;
+    safeZone.y += safeZone.shrinkRate;
+    safeZone.width -= safeZone.shrinkRate * 2;
+    safeZone.height -= safeZone.shrinkRate * 2;
+  }
+
+  // Damage player if outside safe zone
+  if (
+    player.x < safeZone.x || player.x > safeZone.x + safeZone.width ||
+    player.y < safeZone.y || player.y > safeZone.y + safeZone.height
+  ) {
+    player.health -= 0.3;
+    if (player.health < 0) player.health = 0;
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw safe zone
+  ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(safeZone.x, safeZone.y, safeZone.width, safeZone.height);
+
+  // Draw player
+  ctx.fillStyle = player.color;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw player gun direction
+  ctx.strokeStyle = 'black';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(player.x, player.y);
+  ctx.lineTo(player.x + Math.cos(player.angle) * player.radius * 2, player.y + Math.sin(player.angle) * player.radius * 2);
+  ctx.stroke();
+
+  // Draw bullets
+  bullets.forEach(b => {
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fill();
   });
 
-  btnNext.addEventListener('click', () => {
-    nextTurn();
+  // Draw enemies
+  enemies.forEach(e => {
+    ctx.fillStyle = e.color;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+    ctx.fill();
   });
 
-  btnReset.addEventListener('click', () => {
-    if (!gameStarted) return;
-    players.forEach(p => p.points = 0);
-    round = 1;
-    roundSpan.textContent = round;
-    dealerDone = false;
-    currentPlayerIndex = 0;
-    clearMessage();
-    updateTurnInfo();
-    updateButtons();
-    renderPlayers();
-    renderDealerCards();
-  });
+  // Draw player health
+  ctx.fillStyle = 'red';
+  ctx.fillRect(20, 20, player.health * 2, 20);
+  ctx.strokeStyle = 'black';
+  ctx.strokeRect(20, 20, 200, 20);
 
-  btnStart.addEventListener('click', () => {
-    const count = parseInt(playerCountInput.value);
-    if (isNaN(count) || count < 2 || count > 4) {
-      alert("Please enter a number between 2 and 4 for players.");
-      return;
-    }
-    players = [];
-    for (let i = 0; i < count; i++) {
-      players.push({ hand: [], points: 0, busted: false, stood: false });
-    }
-    round = 1;
-    gameStarted = true;
-    dealerDone = false;
-    currentPlayerIndex = 0;
-    clearMessage();
-    roundSpan.textContent = round;
-    renderPlayers();
-    renderDealerCards();
-    updateTurnInfo();
-    updateButtons();
-    createDeck();
-    shuffleDeck();
-    dealInitialCards();
-    btnReset.disabled = false;
-  });
+  // Health text
+  ctx.fillStyle = 'black';
+  ctx.font = '16px Arial';
+  ctx.fillText('Health', 20, 15);
+}
 
+function gameLoop() {
+  update();
+  draw();
+
+  if (player.health <= 0) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'white';
+    ctx.font = '48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Game Over!', canvas.width / 2, canvas.height / 2);
+  } else {
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+gameLoop();
 </script>
 
 </body>
