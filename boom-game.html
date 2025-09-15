@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Boom Runner — Top-down Shooter</title>
+<style>
+  :root{
+    --bg:#0c0c0f; --panel:rgba(10,10,12,0.78); --accent:#ffb86b; --muted:#bdbdbd;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:Inter,system-ui,Segoe UI,Arial;color:#eee}
+  canvas{display:block;width:100vw;height:100vh;background:#0a0a0a;touch-action:none}
+  #ui { position: absolute; left:12px; top:12px; z-index:30; background:var(--panel); padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.04); }
+  #hud { position:absolute; right:12px; top:12px; z-index:30; background:var(--panel); padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.04); min-width:180px; text-align:right;}
+  .small{font-size:12px;color:var(--muted)}
+  .kbd{display:inline-block;padding:2px 6px;border-radius:6px;background:#111;border:1px solid #222;font-weight:700;font-size:12px}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:60;pointer-events:auto}
+  .panel{background:rgba(0,0,0,0.78);padding:18px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);color:#fff}
+  button{background:var(--accent);border:0;padding:10px 14px;border-radius:8px;font-weight:800;cursor:pointer}
+  #bigText{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:70;text-align:center;pointer-events:none}
+  #bigText h2{margin:0;font-size:28px;color:var(--accent)}
+  footer{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;color:rgba(255,255,255,0.65)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <div style="font-weight:700">Boom Runner</div>
+  <div class="small" style="margin-top:6px">WASD move · Mouse aim · Click/Space shoot</div>
+  <div class="small" style="margin-top:6px">P pause · R restart</div>
+</div>
+
+<div id="hud">
+  <div><strong id="score">Score: 0</strong></div>
+  <div class="small" id="waveLabel">Wave 0</div>
+  <div class="small" id="enCount">Enemies: 0</div>
+  <div style="margin-top:8px" class="small">Health</div>
+  <div style="background:#111;border-radius:8px;padding:4px;margin-top:6px">
+    <div id="hpBar" style="height:12px;background:linear-gradient(90deg,var(--accent),#ff8a66);width:100%;border-radius:6px"></div>
+  </div>
+  <div style="margin-top:8px" class="small">Ammo: <span id="ammoLabel">12</span></div>
+</div>
+
+<div id="overlay">
+  <div class="panel" id="menu">
+    <h3 style="margin:0 0 8px 0">Boom Runner</h3>
+    <div class="small">Enemies use your image <code>boom.jpg</code>. Place that file next to this HTML.</div>
+    <div style="margin-top:12px"><button id="start">Start Game</button></div>
+    <div class="small" style="margin-top:10px">Click the canvas once after opening if audio won't play on the first shot.</div>
+  </div>
+</div>
+
+<div id="bigText" aria-hidden="true"></div>
+<footer>Place <code>boom.jpg</code> beside this file. Refresh to reset fully.</footer>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha:false });
+  let W = canvas.width = innerWidth, H = canvas.height = innerHeight;
+  window.addEventListener('resize', ()=>{ W = canvas.width = innerWidth; H = canvas.height = innerHeight; });
+
+  // UI DOM refs
+  const overlay = document.getElementById('overlay');
+  const menu = document.getElementById('menu');
+  const startBtn = document.getElementById('start');
+  const bigText = document.getElementById('bigText');
+  const scoreLabel = document.getElementById('score');
+  const waveLabel = document.getElementById('waveLabel');
+  const enCount = document.getElementById('enCount');
+  const hpBar = document.getElementById('hpBar');
+  const ammoLabel = document.getElementById('ammoLabel');
+
+  // Game state
+  let playing = false;
+  let paused = false;
+  let score = 0;
+  let wave = 0;
+  let enemies = [];
+  let bullets = [];
+  let pickups = [];
+  let lastTime = performance.now();
+  let spawnTimer = 0;
+
+  // Player
+  const player = { x: 0, y: 0, r: 14, angle: 0, speed: 200, health: 100, maxHealth:100 };
+  const weapon = { ammo:12, maxAmmo:12, fireRate: 8, lastShot:0, reload:false, reloadStart:0, reloadTime:1.1 };
+
+  // Controls
+  const keys = {};
+  const pointer = { x:0, y:0, down:false };
+  window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true;
+    if(e.key==='p' || e.key==='P') togglePause();
+    if(e.key==='r' || e.key==='R') { if (!playing) startGame(); else restartGame(); }
+    if((e.key===' ')) { pointer.down = true; e.preventDefault(); }
+    if(!playing && (e.key==='Enter')) startGame();
+  });
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; if(e.key===' ') pointer.down = false; });
+
+  canvas.addEventListener('mousemove', e => { const rect = canvas.getBoundingClientRect(); pointer.x = e.clientX - rect.left; pointer.y = e.clientY - rect.top; });
+  canvas.addEventListener('pointerdown', e => { pointer.down = true; pointer.x = e.clientX; pointer.y = e.clientY; });
+  canvas.addEventListener('pointerup', e => { pointer.down = false; });
+  canvas.addEventListener('touchstart', e => { const t=e.touches[0]; const r=canvas.getBoundingClientRect(); pointer.x=t.clientX-r.left; pointer.y=t.clientY-r.top; pointer.down=true; e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('touchmove', e => { const t=e.touches[0]; const r=canvas.getBoundingClientRect(); pointer.x=t.clientX-r.left; pointer.y=t.clientY-r.top; e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('touchend', e => { pointer.down=false; }, {passive:false});
+
+  // Load enemy image from local file boom.jpg (must be next to HTML)
+  const enemyImg = new Image();
+  enemyImg.src = 'boom.jpg';
+  enemyImg.onerror = ()=> console.warn('boom.jpg not found — enemies will use fallback circle.');
+
+  // WebAudio simple sounds
+  let audioCtx = null;
+  function ensureAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  function tone(freq,dur=0.08,type='sine',vol=0.06){ try{ ensureAudio(); const now=audioCtx.currentTime; const o=audioCtx.createOscillator(); const g=audioCtx.createGain(); o.type=type; o.frequency.value=freq; g.gain.value=vol; o.connect(g); g.connect(audioCtx.destination); o.start(now); g.gain.setValueAtTime(vol, now); g.gain.exponentialRampToValueAtTime(0.001, now+dur); o.stop(now+dur+0.02); }catch(e){} }
+  function sShot(){ tone(1200,0.06,'square',0.08); }
+  function sHit(){ tone(420,0.06,'sawtooth',0.05); }
+  function sDeath(){ tone(180,0.14,'sine',0.12); }
+
+  // Utility helpers
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function dist(a,b,c,d){ return Math.hypot(a-c, b-d); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+
+  // Enemy definitions (top-down)
+  const ENEMY_TYPES = {
+    runner: { speed:120, hp:20, points:35, size:36, behavior:'melee' },
+    shooter: { speed:55, hp:38, points:70, size:46, behavior:'ranged', fireRate:0.9 },
+    brute: { speed:28, hp:90, points:150, size:66, behavior:'melee' }
+  };
+
+  // Spawn logic
+  function nextWave(){
+    wave++;
+    const count = 3 + Math.floor(wave * 1.6);
+    spawnTimer = 0.8;
+    waveSpawn = { remaining: count, interval: 0.5 };
+  }
+  let waveSpawn = null;
+
+  function spawnEnemy(typeKey){
+    const type = ENEMY_TYPES[typeKey];
+    // spawn at random edge
+    const side = Math.floor(Math.random()*4);
+    let x,y;
+    if(side===0){ x = rand(-40, W+40); y = -60; }
+    else if(side===1){ x = rand(-40, W+40); y = H+60; }
+    else if(side===2){ x = -60; y = rand(-40, H+40); }
+    else { x = W+60; y = rand(-40, H+40); }
+    enemies.push({
+      id:Math.random()*1e9, x, y, vx:0, vy:0,
+      type:typeKey, hp:type.hp, maxHp:type.hp, size:type.size,
+      fireTimer: 0
+    });
+  }
+
+  // Shooting
+  function playerShoot(now){
+    if(weapon.reload) return;
+    if(weapon.ammo <= 0){ tone(320,0.08,'sine',0.05); return; }
+    const interval = 1000/weapon.fireRate;
+    if(now - weapon.lastShot < interval) return;
+    weapon.lastShot = now;
+    weapon.ammo--;
+    sShot();
+    // spawn bullet
+    const angle = Math.atan2(pointer.y - player.y, pointer.x - player.x);
+    const speed = 960;
+    bullets.push({ x: player.x + Math.cos(angle)*(player.r+10), y: player.y + Math.sin(angle)*(player.r+10), vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed, life:1.6, dmg:18 + Math.floor(Math.random()*6) });
+  }
+
+  // bullet update
+  function updateBullets(dt){
+    for(let i=bullets.length-1;i>=0;i--){
+      const b = bullets[i];
+      b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt;
+      // remove on timeout or leaving bounds
+      if(b.life <= 0 || b.x < -200 || b.x > W+200 || b.y < -200 || b.y > H+200){ bullets.splice(i,1); continue; }
+      // hit enemy
+      for(let j=enemies.length-1;j>=0;j--){
+        const e = enemies[j];
+        const d = dist(b.x,b.y,e.x,e.y);
+        if(d < e.size*0.5){
+          e.hp -= b.dmg;
+          bullets.splice(i,1);
+          sHit();
+          if(e.hp <= 0){
+            score += ENEMY_TYPES[e.type].points;
+            sDeath();
+            // spawn small pickup occasionally
+            if(Math.random() < 0.25) pickups.push({ x:e.x + rand(-18,18), y:e.y + rand(-18,18), type: Math.random()<0.5 ? 'health' : 'ammo', ttl:8.0 });
+            enemies.splice(j,1);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // enemy bullets
+  function updateEnemyBullets(dt){
+    for(let i=enemyBullets.length-1;i>=0;i--){
+      const b = enemyBullets[i];
+      b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt;
+      if(b.life <= 0 || b.x < -200 || b.x > W+200 || b.y < -200 || b.y > H+200){ enemyBullets.splice(i,1); continue; }
+      if(dist(b.x,b.y,player.x,player.y) < player.r + 6){
+        player.health -= b.dmg;
+        enemyBullets.splice(i,1);
+        sHit();
+      }
+    }
+  }
+
+  // simple AI movement & behavior
+  function updateEnemies(dt, now){
+    for(const e of enemies){
+      const type = ENEMY_TYPES[e.type];
+      const dx = player.x - e.x, dy = player.y - e.y;
+      const d = Math.hypot(dx,dy);
+      // rotate toward player
+      e.angle = Math.atan2(dy,dx);
+
+      // behavior
+      if(type.behavior === 'melee'){
+        // run at player
+        const speed = type.speed;
+        const desiredVx = Math.cos(e.angle)*speed;
+        const desiredVy = Math.sin(e.angle)*speed;
+        e.vx += (desiredVx - e.vx) * clamp(dt*5,0,1);
+        e.vy += (desiredVy - e.vy) * clamp(dt*5,0,1);
+      } else if (type.behavior === 'ranged'){
+        // keep distance and strafe
+        if(d > 260){
+          // approach
+          const speed = type.speed;
+          e.vx += (Math.cos(e.angle)*speed - e.vx) * clamp(dt*4,0,1);
+          e.vy += (Math.sin(e.angle)*speed - e.vy) * clamp(dt*4,0,1);
+        } else if (d < 160){
+          // back off
+          e.vx += ( -Math.cos(e.angle)*type.speed*0.9 - e.vx) * clamp(dt*4,0,1);
+          e.vy += ( -Math.sin(e.angle)*type.speed*0.9 - e.vy) * clamp(dt*4,0,1);
+        } else {
+          // strafe around
+          const side = Math.sign(Math.sin(now/600 + e.id));
+          const svx = Math.cos(e.angle + Math.PI/2*side) * type.speed * 0.8;
+          const svy = Math.sin(e.angle + Math.PI/2*side) * type.speed * 0.8;
+          e.vx += (svx - e.vx) * clamp(dt*3,0,1);
+          e.vy += (svy - e.vy) * clamp(dt*3,0,1);
+        }
+
+        // shooting
+        e.fireTimer -= dt;
+        if(e.fireTimer <= 0 && d < 800 && Math.random() < 0.9){
+          e.fireTimer = 1.0 + Math.random()*0.6 - Math.min(0.6, wave*0.02);
+          const aim = Math.atan2(player.y - e.y, player.x - e.x) + (Math.random()-0.5)*0.06;
+          enemyBullets.push({ x:e.x + Math.cos(aim)*12, y:e.y + Math.sin(aim)*12, vx:Math.cos(aim)*360, vy:Math.sin(aim)*360, life:2.4, dmg:6 + Math.floor(Math.random()*6) });
+          // small sound
+          tone(700,0.04,'square',0.04);
+        }
+      } else {
+        // default: wander slowly
+        e.vx *= 0.98; e.vy *= 0.98;
+      }
+
+      // move and collide with walls (simple bounds)
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      // keep inside playable area
+      e.x = clamp(e.x, 12, W-12);
+      e.y = clamp(e.y, 12, H-12);
+
+      // melee contact
+      if(type.behavior === 'melee' && d < (player.r + (e.size/2 - 4))){
+        // damage player with cooldown
+        if(!e._hitCooldown || now - e._hitCooldown > 700){
+          player.health -= Math.max(4, Math.round(type.speed / 30));
+          e._hitCooldown = now;
+          sHit();
+        }
+      }
+    }
+  }
+
+  // pickups update
+  function updatePickups(dt){
+    for(let i=pickups.length-1;i>=0;i--){
+      const p = pickups[i];
+      p.ttl -= dt;
+      if(p.ttl <= 0) { pickups.splice(i,1); continue; }
+      if(dist(p.x,p.y,player.x,player.y) < player.r + 10){
+        if(p.type === 'health'){ player.health = clamp(player.health + 30, 0, player.maxHealth); tone(420,0.08,'sine',0.06); }
+        else { weapon.ammo = clamp(weapon.ammo + Math.ceil(weapon.maxAmmo*0.6), 0, weapon.maxAmmo); tone(1100,0.06,'square',0.06); }
+        pickups.splice(i,1);
+      }
+    }
+  }
+
+  // spawn wave flow and periodic spawns
+  function waveLogic(dt, now){
+    if(!waveSpawn && enemies.length===0 && playing){
+      // start next wave after short pause
+      setTimeout(()=>{ nextWave(); }, 700);
+      waveSpawn = null;
+    }
+    if(waveSpawn){
+      spawnTimer -= dt;
+      if(spawnTimer <= 0 && waveSpawn.remaining > 0){
+        // choose enemy type by wave
+        let t = 'runner';
+        const r = Math.random();
+        if(wave >= 2 && r > 0.6) t = 'shooter';
+        if(wave >= 4 && r > 0.92) t = 'brute';
+        spawnEnemy(t);
+        waveSpawn.remaining--;
+        spawnTimer = 0.45 + Math.random()*0.45;
+      }
+      if(waveSpawn.remaining <= 0) waveSpawn = null;
+    } else {
+      // if no active enemies and no pending spawn -> start next wave after short pause
+      if(enemies.length===0 && playing && (!waveSpawn)) {
+        // schedule next wave
+        waveSpawn = null;
+        setTimeout(()=>{ nextWave(); }, 800);
+      }
+    }
+  }
+
+  // draw everything
+  function render(now){
+    ctx.clearRect(0,0,W,H);
+    // background grid
+    ctx.fillStyle = '#101014';
+    ctx.fillRect(0,0,W,H);
+
+    // subtle grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+    ctx.lineWidth = 1;
+    for(let gx=0; gx < W; gx += 48){ ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,H); ctx.stroke(); }
+    for(let gy=0; gy < H; gy += 48){ ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(W,gy); ctx.stroke(); }
+
+    // pickups
+    for(const p of pickups){
+      if(p.type === 'health'){
+        ctx.fillStyle = 'rgba(120,255,140,0.95)';
+        ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#052'; ctx.fillRect(p.x-3,p.y-1,6,2);
+      } else {
+        ctx.fillStyle = 'rgba(140,180,255,0.95)';
+        ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#034'; ctx.fillRect(p.x-4,p.y-1,8,2);
+      }
+    }
+
+    // enemies (draw sorted by y for depth)
+    enemies.sort((a,b)=> (a.y - b.y));
+    for(const e of enemies){
+      const size = e.size;
+      const x = e.x, y = e.y;
+      // draw image centered if loaded
+      if(enemyImg.complete && enemyImg.naturalWidth !== 0){
+        ctx.save();
+        // scale image to size, optionally rotate or tint (we keep full image)
+        ctx.translate(x, y);
+        // small bob
+        const bob = Math.sin((performance.now()/300) + e.id) * 2;
+        ctx.translate(0,bob);
+        ctx.drawImage(enemyImg, -size/2, -size/2, size, size);
+        ctx.restore();
+      } else {
+        // fallback circle
+        ctx.save();
+        ctx.fillStyle = e.type==='runner' ? '#ff7b59' : e.type==='shooter' ? '#ffd86b' : '#d66a6a';
+        ctx.beginPath(); ctx.ellipse(x, y, size/2, size/2, 0, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+      // hp bar
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - size/2, y - size/2 - 10, size, 6);
+      ctx.fillStyle = '#e04a4a'; ctx.fillRect(x - size/2, y - size/2 - 10, size * clamp(e.hp / e.maxHp, 0, 1), 6);
+    }
+
+    // bullets
+    ctx.fillStyle = '#fff2b8';
+    for(const b of bullets){
+      ctx.beginPath(); ctx.arc(b.x,b.y,3,0,Math.PI*2); ctx.fill();
+    }
+    // enemy bullets
+    ctx.fillStyle = '#ffdab0';
+    for(const b of enemyBullets){
+      ctx.beginPath(); ctx.arc(b.x,b.y,3,0,Math.PI*2); ctx.fill();
+    }
+
+    // player
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    // aim rotation
+    const pa = player.angle;
+    ctx.rotate(pa);
+    // body
+    ctx.fillStyle = '#cfe7ff';
+    ctx.beginPath(); ctx.arc(0,0,player.r,0,Math.PI*2); ctx.fill();
+    // gun as rectangle
+    ctx.fillStyle = '#222';
+    ctx.fillRect(0, -4, player.r + 10, 8);
+    ctx.restore();
+
+    // HUD is DOM; update values
+    scoreLabel.textContent = `Score: ${score}`;
+    waveLabel.textContent = `Wave ${wave}`;
+    enCount.textContent = `Enemies: ${enemies.length}`;
+    hpBar.style.width = `${clamp(player.health / player.maxHealth * 100, 0, 100)}%`;
+    ammoLabel.textContent = `${weapon.ammo}`;
+
+    // overlay messages
+    if(!playing){
+      bigText.innerHTML = `<h2>Click Start to play</h2>`;
+    } else if(paused){
+      bigText.innerHTML = `<h2>Paused</h2>`;
+    } else {
+      bigText.innerHTML = '';
+    }
+  }
+
+  // game loop
+  let enemyBullets = [];
+  let bullets = [];
+
+  function step(now){
+    const dt = clamp((now - lastTime)/1000, 0, 0.05);
+    lastTime = now;
+    if(playing && !paused){
+      // player rotation toward pointer
+      player.angle = Math.atan2(pointer.y - player.y, pointer.x - player.x);
+
+      // movement
+      let mvx = 0, mvy = 0;
+      if(keys['w']){ mvx += Math.cos(player.angle) * player.speed; mvy += Math.sin(player.angle) * player.speed; }
+      if(keys['s']){ mvx += Math.cos(player.angle) * -player.speed; mvy += Math.sin(player.angle) * -player.speed; }
+      if(keys['a']){ mvx += Math.cos(player.angle - Math.PI/2) * player.speed; mvy += Math.sin(player.angle - Math.PI/2) * player.speed; }
+      if(keys['d']){ mvx += Math.cos(player.angle + Math.PI/2) * player.speed; mvy += Math.sin(player.angle + Math.PI/2) * player.speed; }
+
+      // normalize to avoid faster diagonal speed
+      if(mvx !==0 || mvy !==0){
+        const m = Math.hypot(mvx,mvy);
+        mvx = mvx / m * player.speed;
+        mvy = mvy / m * player.speed;
+      }
+      player.x += mvx * dt;
+      player.y += mvy * dt;
+      // clamp player in bounds
+      player.x = clamp(player.x, 18, W-18);
+      player.y = clamp(player.y, 18, H-18);
+
+      // firing
+      if(pointer.down || keys[' ']){
+        playerShoot(now);
+      }
+
+      // update bullets
+      updateBullets(dt);
+      updateEnemyBullets(dt);
+
+      // update enemies & pickups & wave logic
+      updateEnemies(dt, now);
+      updatePickups(dt);
+      waveLogic(dt, now);
+
+      // reload handling
+      if(weapon.reload){
+        if(now - weapon.reloadStart >= weapon.reloadTime*1000){
+          weapon.ammo = weapon.maxAmmo;
+          weapon.reload = false;
+        }
+      }
+
+      // death
+      if(player.health <= 0){
+        player.health = 0;
+        playing = false;
+        paused = false;
+        bigText.innerHTML = `<h2>Game Over</h2><div style="margin-top:10px">Score: ${score}</div><div style="margin-top:12px"><button id="restartBtn">Restart</button></div>`;
+        // attach restart handler
+        setTimeout(()=>{ const rb = document.getElementById('restartBtn'); if(rb) rb.addEventListener('click', ()=>{ restartGame(); }); }, 20);
+      }
+    }
+    render(now);
+    requestAnimationFrame(step);
+  }
+
+  // start / restart / pause logic
+  startBtn.addEventListener('click', ()=> startGame());
+  startBtn.addEventListener('pointerdown', (e)=>{ if(e.target === startBtn) startGame(); });
+
+  function startGame(){
+    // require a user gesture for audio on some browsers
+    try{ ensureAudio(); }catch(e){}
+    overlay.style.display = 'none';
+    playing = true;
+    paused = false;
+    score = 0; wave = 0; enemies = []; bullets = []; enemyBullets = []; pickups = [];
+    player.x = W/2; player.y = H/2; player.health = player.maxHealth; weapon.ammo = weapon.maxAmmo; waveSpawn = null;
+    // spawn first wave quickly
+    setTimeout(()=>{ nextWave(); }, 200);
+  }
+
+  function restartGame(){
+    overlay.style.display = 'none';
+    playing = true;
+    paused = false;
+    score = 0; wave = 0; enemies = []; bullets = []; enemyBullets = []; pickups = [];
+    player.x = W/2; player.y = H/2; player.health = player.maxHealth; weapon.ammo = weapon.maxAmmo; waveSpawn = null;
+    setTimeout(()=>{ nextWave(); }, 200);
+  }
+
+  function togglePause(){
+    if(!playing) return;
+    paused = !paused;
+  }
+
+  // initial placeholder
+  lastTime = performance.now();
+  requestAnimationFrame(step);
+
+  // small convenience: reload key
+  document.addEventListener('keydown', e => {
+    if(e.key.toLowerCase() === 'r'){ restartGame(); }
+  });
+
+  // make elements focusable for keyboard start
+  startBtn.tabIndex = 0;
+
+  // expose debug in console
+  window.__boomGame = { startGame, restartGame, getState: ()=>({playing, wave, score, enemiesCount: enemies.length}) };
+
+})();
+</script>
+</body>
+</html>
