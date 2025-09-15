@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Simple Blackjack</title>
+<title>Blackjack with Points & Multiple Rounds</title>
 <style>
   body {
     font-family: Arial, sans-serif;
@@ -52,13 +52,21 @@
     border-radius: 5px;
     cursor: pointer;
   }
-  button:hover {
+  button:hover:not(:disabled) {
     background: #2e7d32;
+  }
+  button:disabled {
+    background: #555;
+    cursor: not-allowed;
   }
   #message {
     margin-top: 20px;
     font-size: 20px;
     min-height: 28px;
+  }
+  #status {
+    margin-bottom: 15px;
+    font-size: 18px;
   }
 </style>
 </head>
@@ -66,6 +74,10 @@
 
 <div id="game">
   <h1>Blackjack</h1>
+
+  <div id="status">
+    Round: <span id="round">1</span> | Your Points: <span id="points">0</span>
+  </div>
 
   <div>
     <h2>Dealer's Hand (<span id="dealer-score">0</span>)</h2>
@@ -80,7 +92,8 @@
   <div>
     <button id="btn-hit">Hit</button>
     <button id="btn-stand">Stand</button>
-    <button id="btn-new">New Game</button>
+    <button id="btn-new" disabled>Next Round</button>
+    <button id="btn-reset">Reset Points</button>
   </div>
 
   <div id="message"></div>
@@ -95,15 +108,21 @@
   let dealerHand = [];
   let gameOver = false;
 
+  let round = 1;
+  let points = 0;
+
   const dealerCardsDiv = document.getElementById('dealer-cards');
   const playerCardsDiv = document.getElementById('player-cards');
   const dealerScoreSpan = document.getElementById('dealer-score');
   const playerScoreSpan = document.getElementById('player-score');
   const messageDiv = document.getElementById('message');
+  const roundSpan = document.getElementById('round');
+  const pointsSpan = document.getElementById('points');
 
   const btnHit = document.getElementById('btn-hit');
   const btnStand = document.getElementById('btn-stand');
   const btnNew = document.getElementById('btn-new');
+  const btnReset = document.getElementById('btn-reset');
 
   function createDeck() {
     deck = [];
@@ -155,13 +174,10 @@
       // Hide dealer's second card if game not over
       if (i === 1 && !gameOver) {
         cardDiv.textContent = '?';
+        cardDiv.style.color = 'black';
       } else {
         cardDiv.textContent = card.value + card.suit;
-        if (card.suit === '♥' || card.suit === '♦') {
-          cardDiv.style.color = 'red';
-        } else {
-          cardDiv.style.color = 'black';
-        }
+        cardDiv.style.color = (card.suit === '♥' || card.suit === '♦') ? 'red' : 'black';
       }
       dealerCardsDiv.appendChild(cardDiv);
     });
@@ -170,11 +186,7 @@
       const cardDiv = document.createElement('div');
       cardDiv.classList.add('card');
       cardDiv.textContent = card.value + card.suit;
-      if (card.suit === '♥' || card.suit === '♦') {
-        cardDiv.style.color = 'red';
-      } else {
-        cardDiv.style.color = 'black';
-      }
+      cardDiv.style.color = (card.suit === '♥' || card.suit === '♦') ? 'red' : 'black';
       playerCardsDiv.appendChild(cardDiv);
     });
 
@@ -183,6 +195,10 @@
   }
 
   function dealInitial() {
+    if (deck.length < 10) { // reshuffle if deck too low
+      createDeck();
+      shuffleDeck();
+    }
     playerHand = [deck.pop(), deck.pop()];
     dealerHand = [deck.pop(), deck.pop()];
     gameOver = false;
@@ -190,6 +206,7 @@
     renderCards();
     btnHit.disabled = false;
     btnStand.disabled = false;
+    btnNew.disabled = true;
   }
 
   function checkForEnd() {
@@ -200,6 +217,7 @@
       renderCards();
       btnHit.disabled = true;
       btnStand.disabled = true;
+      btnNew.disabled = false;
       return true;
     }
     return false;
@@ -219,20 +237,25 @@
 
     if (dealerScore > 21) {
       messageDiv.textContent = 'Dealer busted! You win!';
+      points++;
     } else if (playerScore > dealerScore) {
       messageDiv.textContent = 'You win!';
+      points++;
     } else if (playerScore < dealerScore) {
       messageDiv.textContent = 'Dealer wins!';
     } else {
       messageDiv.textContent = 'It\'s a tie!';
     }
+    pointsSpan.textContent = points;
   }
 
   btnHit.addEventListener('click', () => {
     if (gameOver) return;
     playerHand.push(deck.pop());
     renderCards();
-    checkForEnd();
+    if (checkForEnd()) {
+      btnNew.disabled = false;
+    }
   });
 
   btnStand.addEventListener('click', () => {
@@ -243,11 +266,20 @@
     determineWinner();
     btnHit.disabled = true;
     btnStand.disabled = true;
+    btnNew.disabled = false;
   });
 
   btnNew.addEventListener('click', () => {
-    createDeck();
-    shuffleDeck();
+    round++;
+    roundSpan.textContent = round;
+    dealInitial();
+  });
+
+  btnReset.addEventListener('click', () => {
+    points = 0;
+    round = 1;
+    pointsSpan.textContent = points;
+    roundSpan.textContent = round;
     dealInitial();
   });
 
