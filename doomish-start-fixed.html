@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Doom-ish — Start Button Fixed</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{--ui-bg: rgba(6,6,6,0.78);--accent:#ffcf66;--muted:#bdbdbd}
+  html,body{height:100%;margin:0;background:#050505;color:#ddd;font-family:Inter,system-ui,Arial}
+  #container{position:relative;height:100vh;overflow:hidden}
+  canvas{display:block;background:#111;width:100%;height:100%}
+  #ui{position:absolute;left:12px;top:12px;z-index:30;background:var(--ui-bg);padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);min-width:240px}
+  h1{margin:0;font-size:15px}
+  .small{font-size:12px;color:var(--muted)}
+  #hud{position:absolute;right:12px;top:12px;background:var(--ui-bg);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);z-index:30;min-width:220px}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:60;pointer-events:auto}
+  .panel{background:rgba(0,0,0,0.78);padding:18px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);color:#fff;box-shadow:0 8px 30px rgba(0,0,0,0.6)}
+  #startBtn{display:inline-block;padding:10px 14px;border-radius:8px;border:0;background:var(--accent);color:#111;font-weight:800;cursor:pointer;font-size:16px}
+  #startBtn:active{transform:translateY(1px);opacity:0.95}
+  #bigText{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:70;text-align:center;pointer-events:none}
+  #bigText h2{margin:0;font-size:34px;color:var(--accent);text-shadow:0 4px 18px rgba(0,0,0,0.7)}
+  .kbd{display:inline-block;padding:2px 6px;border-radius:5px;background:#171717;border:1px solid #232323;color:#f3f3f3;font-weight:700;font-size:12px}
+</style>
+</head>
+<body>
+<div id="container">
+  <canvas id="view"></canvas>
+
+  <div id="ui">
+    <h1>Doom-ish — Start Fix</h1>
+    <div class="small" style="margin-top:6px">WASD move • Q/E turn • Space to fire • R reload • P pause</div>
+  </div>
+
+  <div id="hud">
+    <strong id="waveLabel">Wave 0</strong><div class="small" id="waveTimer">Next: —</div>
+    <div style="margin-top:8px" class="small">Health <div id="hpBar" style="height:10px;background:linear-gradient(90deg,var(--accent),#ffb86b);width:100%;border-radius:6px;margin-top:6px"></div></div>
+  </div>
+
+  <div id="bigText" aria-hidden="true"></div>
+
+  <!-- Menu overlay -->
+  <div id="overlay">
+    <div class="panel" role="dialog" aria-label="Main menu">
+      <h3 style="margin:0 0 8px 0">Doom-ish — Fixed Start</h3>
+      <div class="small">Click the button, tap it, or press <span class="kbd">Enter</span> to start.</div>
+      <div style="margin-top:12px">
+        <!-- real button element ensures reliable click behavior -->
+        <button id="startBtn" type="button">Start Game</button>
+      </div>
+      <div style="margin-top:10px" class="small">If this still doesn't respond, try clicking anywhere once to give the tab input focus.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Minimal, focused fix: start button and start behavior.
+   This script contains only the parts relevant to starting the game and proving it's responsive.
+   I kept the game loop tiny so you can verify Start works; you can drop your full game logic back in.
+*/
+
+const canvas = document.getElementById('view');
+const ctx = canvas.getContext('2d', { alpha:false });
+let W = canvas.width = window.innerWidth;
+let H = canvas.height = window.innerHeight;
+window.addEventListener('resize', () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; drawPlaceholder(); });
+
+// UI references
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+const bigText = document.getElementById('bigText');
+const waveLabel = document.getElementById('waveLabel');
+const waveTimer = document.getElementById('waveTimer');
+const hpBar = document.getElementById('hpBar');
+
+let gameRunning = false;
+let loopHandle = null;
+let demoState = { time:0 };
+
+// Draw a simple placeholder view so user sees the canvas is active before start
+function drawPlaceholder(){
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(0,0,W,Math.floor(H/2));
+  ctx.fillStyle = '#000';
+  ctx.font = '20px monospace';
+  ctx.fillStyle = '#ddd';
+  ctx.fillText('Doom-ish (demo) — menu is open', 18, 42);
+}
+drawPlaceholder();
+
+// Ensure the overlay and button accept pointer events (defensive)
+overlay.style.pointerEvents = 'auto';
+startBtn.style.pointerEvents = 'auto';
+
+// Start action: hide overlay and begin "game"
+function startGame(){
+  // Visual press feedback (quick)
+  startBtn.style.transform = 'scale(0.995)';
+  setTimeout(()=> startBtn.style.transform = '', 120);
+
+  // hide menu
+  overlay.style.display = 'none';
+  gameRunning = true;
+  demoState.time = performance.now();
+
+  // Start a tiny demo loop — replace this with your full game's start routine
+  if (loopHandle === null) {
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+// Make sure the button responds to both click and pointerdown (covers mouse/touch)
+startBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  startGame();
+});
+startBtn.addEventListener('pointerdown', (e) => {
+  // pointerdown fires before click on many devices — keep this to guarantee responsiveness
+  e.preventDefault();
+  // If overlay is visible and user pressed pointerdown outside panel, we still want the button only.
+  // Only call startGame if pointer event was on the button element.
+  if (e.target === startBtn) startGame();
+});
+
+// Also allow Enter to start when menu is focused (keyboard)
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === 'Return') && overlay.style.display !== 'none') {
+    startGame();
+  }
+});
+
+// If user clicks outside the panel (overlay background), do not close menu.
+// But if they'd prefer a click-anywhere-to-start fallback, uncomment the following:
+// overlay.addEventListener('pointerdown', startGame);
+
+function gameLoop(now){
+  // tiny demo of a running "game" so you can confirm start worked
+  demoState.time = now;
+  // draw moving bars and HUD
+  ctx.fillStyle = '#222';
+  ctx.fillRect(0,0,W,H);
+  // fake horizon/ceiling
+  ctx.fillStyle = '#3a3a3a';
+  ctx.fillRect(0,0,W,H/2);
+  ctx.fillStyle = '#0f0f0f';
+  ctx.fillRect(0,H/2,W,H/2);
+
+  // draw a rotating indicator
+  const t = (now/1000) % (Math.PI*2);
+  ctx.save();
+  ctx.translate(W/2, H/2 - 40);
+  ctx.rotate(t);
+  ctx.fillStyle = '#ffb86b';
+  ctx.fillRect(-60, -10, 120, 20);
+  ctx.restore();
+
+  // update small HUD text so you see things are alive
+  waveLabel.textContent = 'Wave 1';
+  waveTimer.textContent = `Time: ${Math.floor(now/1000)}s`;
+  hpBar.style.width = `${Math.max(10, 100 - (Math.floor(now/1000) % 100))}%`;
+
+  // keep looping
+  loopHandle = requestAnimationFrame(gameLoop);
+}
+
+// Extra defensive debugging: if the button still doesn't work for you, show a visible hint
+// (uncomment to get a visual console message)
+// console.log('Start button attached, overlay visible:', overlay.style.display !== 'none');
+
+</script>
+</body>
+</html>
