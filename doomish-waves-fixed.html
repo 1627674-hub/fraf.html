@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Doom-ish — Waves & Smarter Enemies</title>
+<title>Doom-ish — Waves (fixed enemies & attacks)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   html,body{height:100%;margin:0;background:#070707;color:#ddd;font-family:system-ui,Arial}
@@ -25,7 +25,7 @@
   <canvas id="view"></canvas>
 
   <div id="ui">
-    <h1>Doom-ish Raycaster — Waves</h1>
+    <h1>Doom-ish Raycaster — Waves (fixed)</h1>
     <div class="stat">Move: <strong>W/A/S/D</strong> • Turn: <strong>Q/E</strong> or <strong>←/→</strong></div>
     <div class="stat">Shoot: <span class="kbd">Space</span> hold • Reload: <span class="kbd">R</span></div>
     <div class="stat">Map: <span class="kbd">M</span> toggle • <span class="kbd">N</span> cycle size</div>
@@ -76,16 +76,16 @@
   }
   const textures = { 1: makeTexture('#8f6a4a', true), 2: makeTexture('#4b8a9a', true), 3: makeTexture('#7a4b9a', false) };
 
-  // Enemy prototype & containers
-  let enemies = [];       // alive enemy objects
-  let enemyBullets = [];  // bullets fired by enemies
+  // Enemy containers & score
+  let enemies = [];
+  let enemyBullets = [];
   let score = 0;
 
   // Wave system
   let waveNumber = 0;
-  let waveState = 'waiting'; // waiting -> spawning -> active -> cleared -> intermission
-  let intermissionTimer = 0; // seconds until next wave or spawn timer
-  let waveConfig = {};       // current wave parameters
+  let waveState = 'waiting'; // waiting -> spawning -> active -> intermission
+  let intermissionTimer = 0;
+  let waveConfig = {};
 
   // Minimap modes
   const minimapModes = [0.12, 0.20, 0.32];
@@ -154,7 +154,7 @@
     return {dist:2000,x:player.x + Math.cos(angle)*2000, y:player.y + Math.sin(angle)*2000, tex:1, texX:0};
   }
 
-  // --- A* Pathfinding on grid (tile graph) ---
+  // --- BFS Pathfinding (reliable & simple) ---
   function tileNeighbors(node){
     const [x,y]=node;
     const n=[];
@@ -165,77 +165,69 @@
     }
     return n;
   }
-  function heuristic(a,b){ return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]); }
-  function aStar(startTile, goalTile){
-    // startTile,goalTile: [tx,ty]
+
+  function bfs(startTile, goalTile){
     const startKey = startTile.join(',');
     const goalKey = goalTile.join(',');
-    const open = new TinyHeap((a,b)=>a.f - b.f);
+    if (startKey === goalKey) return [];
+    const q = [startTile];
     const came = new Map();
-    const gScore = new Map();
-    gScore.set(startKey,0);
-    open.push({key:startKey, pos:startTile, f:heuristic(startTile,goalTile)});
-    while(open.size()){
-      const current = open.pop();
-      const curKey = current.key;
-      const curPos = current.pos;
-      if (curKey === goalKey){
-        // reconstruct path
+    came.set(startKey, null);
+    while(q.length){
+      const cur = q.shift();
+      const curKey = cur.join(',');
+      if (curKey === goalKey) {
+        // reconstruct
         const path = [];
         let k = curKey;
-        while(k !== startKey){ path.push(k.split(',').map(Number)); k = came.get(k); if (!k) break; }
+        while(k !== startKey){
+          const pos = k.split(',').map(Number);
+          path.push(pos);
+          k = came.get(k);
+        }
         path.reverse();
         return path;
       }
-      for(const nb of tileNeighbors(curPos)){
+      for(const nb of tileNeighbors(cur)){
         const nbKey = nb.join(',');
-        const tentative = (gScore.get(curKey) || 1e9) + 1;
-        if (tentative < (gScore.get(nbKey) || 1e9)){
+        if (!came.has(nbKey)){
           came.set(nbKey, curKey);
-          gScore.set(nbKey, tentative);
-          const f = tentative + heuristic(nb, goalTile);
-          open.push({key:nbKey, pos:nb, f});
+          q.push(nb);
         }
       }
     }
     return null;
   }
 
-  // Tiny binary heap for A*
-  function TinyHeap(cmp){
-    this.arr=[]; this.cmp=cmp||((a,b)=>a-b);
-    this.size = ()=>this.arr.length;
-    this.push = (v)=>{ this.arr.push(v); siftUp(this.arr.length-1); };
-    this.pop = ()=>{ if(this.arr.length===0) return null; const top=this.arr[0]; const end=this.arr.pop(); if(this.arr.length>0){ this.arr[0]=end; siftDown(0); } return top; };
-    function siftUp(i){ while(i>0){ const p=(i-1)>>1; if(cmp(this.arr[i], this.arr[p])<0){ [this.arr[i],this.arr[p]]=[this.arr[p],this.arr[i]]; i=p; } else break; } }
-    function siftDown(i){ const n=this.arr.length; while(true){ let l=2*i+1, r=2*i+2, m=i; if(l<n && cmp(this.arr[l],this.arr[m])<0) m=l; if(r<n && cmp(this.arr[r],this.arr[m])<0) m=r; if(m===i) break; [this.arr[i],this.arr[m]]=[this.arr[m],this.arr[i]]; i=m; } }
-  }
-
-  // Helper: choose spawn tile far from player
-  function randomSpawnTile(minDistTiles=5){
+  // Helper: choose spawn tile far from player (looser min distance)
+  function randomSpawnTile(minDistTiles=3){
     const walkable=[];
     for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(MAP[y][x]===0){
       const worldX = x*TILE+TILE/2, worldY = y*TILE+TILE/2;
       const dist = Math.hypot(worldX-player.x, worldY-player.y);
       if(dist > minDistTiles*TILE) walkable.push([x,y]);
     }
-    if(walkable.length===0) return null;
+    if(walkable.length===0) {
+      // fallback: return any walkable
+      const fallback=[];
+      for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(MAP[y][x]===0) fallback.push([x,y]);
+      if(fallback.length===0) return null;
+      return fallback[Math.floor(Math.random()*fallback.length)];
+    }
     return walkable[Math.floor(Math.random()*walkable.length)];
   }
 
   // Spawn enemy with AI parameters
   function spawnEnemy(wave){
-    const t = randomSpawnTile(4);
+    const t = randomSpawnTile(3);
     if(!t) return;
     const ex = t[0]*TILE + TILE/2, ey = t[1]*TILE + TILE/2;
     const baseHp = 30 + (wave-1)*8;
     const e = {
       x:ex, y:ey, hp: baseHp, maxHp:baseHp,
-      state:'idle', // idle,chase,pathing,attack
-      speed: 40 + (wave-1)*5,
-      dir: Math.random()*Math.PI*2,
-      targetTile:null, path:[], pathTimer:0,
-      fireRate: Math.max(0.6, 1.8 - (wave-1)*0.1), lastShot:0,
+      state:'idle', speed: 40 + (wave-1)*5, dir: Math.random()*Math.PI*2,
+      path:[], pathTimer:0,
+      fireRate: Math.max(0.6, 1.6 - (wave-1)*0.06), lastShot:0,
       pointValue: 50 + (wave-1)*10,
       id: Math.floor(Math.random()*1e6)
     };
@@ -246,33 +238,29 @@
   function startNextWave(){
     waveNumber++;
     waveState = 'spawning';
-    // wave parameters: count grows
     const count = 2 + Math.floor(waveNumber * 1.6);
     waveConfig = { count, spawned:0 };
-    intermissionTimer = 0.5; // small spawn delay before first spawn
+    intermissionTimer = 0.3;
   }
-
-  // When wave cleared
   function onWaveCleared(){
     waveState = 'intermission';
-    intermissionTimer = 6 + Math.min(10, waveNumber*1.2); // give player a breather
+    intermissionTimer = 6 + Math.min(10, waveNumber*1.2);
   }
 
   // Enemy AI update
   function updateEnemies(dt, now){
-    for(let i = enemies.length-1; i>=0; i--){
+    for (let i = enemies.length-1; i >= 0; i--){
       const e = enemies[i];
-      if (e.hp <= 0) { // died — add score & remove
+      if (e.hp <= 0){
         score += e.pointValue;
         enemies.splice(i,1);
         continue;
       }
 
-      // if player close enough for melee, do melee
       const dx = player.x - e.x, dy = player.y - e.y;
       const dist = Math.hypot(dx,dy);
 
-      // Check line of sight by stepping along line
+      // LOS check
       function hasLineOfSight(sx,sy,tx,ty){
         const steps = Math.ceil(Math.hypot(tx-sx,ty-sy)/8);
         for(let s=1;s<=steps;s++){
@@ -281,62 +269,63 @@
         }
         return true;
       }
-
       const los = hasLineOfSight(e.x,e.y,player.x,player.y);
 
-      // Behavior switching
       if (dist < TILE*1.1) {
-        // melee attack occasionally
+        // melee
         e.state = 'attack';
-        if (!e._meleeCd) e._meleeCd = 0;
+        e._meleeCd = e._meleeCd || 0;
         e._meleeCd -= dt;
         if (e._meleeCd <= 0) {
-          // hit player
           player.health -= 8 + Math.floor(Math.random()*4);
-          e._meleeCd = 0.9; // seconds between melee hits
+          e._meleeCd = 0.9;
         }
-        // small knockback for enemy when meleeing (push slightly back)
+        // slight retreat
         const back = Math.atan2(e.y-player.y, e.x-player.x);
         e.x += Math.cos(back) * 4;
         e.y += Math.sin(back) * 4;
       } else if (los && dist < 700) {
-        // direct LOS: chase and ranged fire
+        // direct chase & ranged
         e.state = 'chase';
-        // face and step toward player
         const ang = Math.atan2(dy,dx);
-        e.x += Math.cos(ang) * e.speed * dt;
-        e.y += Math.sin(ang) * e.speed * dt;
-
-        // attempt to shoot if enough time
-        if (now - e.lastShot > (1000 / (1 / e.fireRate)) ) {
-          // fire bullet toward player's current position (slight inaccuracy)
+        // simple obstacle avoidance: try small step; if blocked, attempt small sidestep
+        const stepX = Math.cos(ang) * e.speed * dt;
+        const stepY = Math.sin(ang) * e.speed * dt;
+        if (mapAt(e.x + stepX, e.y + stepY) === 0) {
+          e.x += stepX; e.y += stepY;
+        } else {
+          // sidestep
+          const side = ang + Math.PI/2 * (Math.random() > 0.5 ? 1 : -1);
+          e.x += Math.cos(side) * e.speed * 0.6 * dt;
+          e.y += Math.sin(side) * e.speed * 0.6 * dt;
+        }
+        // shooting: correct timing (ms per shot = 1000 / fireRate)
+        if (!e.lastShot) e.lastShot = 0;
+        if (now - e.lastShot >= (1000 / e.fireRate)) {
           const aimAngle = Math.atan2(dy,dx) + (Math.random()-0.5) * 0.08;
           const speed = 320;
           enemyBullets.push({ x:e.x, y:e.y, vx:Math.cos(aimAngle)*speed, vy:Math.sin(aimAngle)*speed, life:2.2, dmg:6 + Math.floor(Math.random()*4) });
           e.lastShot = now;
         }
       } else {
-        // No LOS: attempt pathfinding occasionally
+        // no LOS -> pathfind occasionally (BFS)
         e.state = 'pathing';
         e.pathTimer -= dt;
-        if (!e.path || e.path.length===0 || e.pathTimer <= 0) {
-          // compute path from enemy tile to player's tile
+        if (!e.path || e.path.length === 0 || e.pathTimer <= 0){
           const startTile = [Math.floor(e.x / TILE), Math.floor(e.y / TILE)];
           const goalTile = [Math.floor(player.x / TILE), Math.floor(player.y / TILE)];
-          const path = aStar(startTile, goalTile);
-          if (path && path.length>0) {
-            e.path = path.map(p => [p[0]*TILE + TILE/2, p[1]*TILE + TILE/2]);
+          const pathTiles = bfs(startTile, goalTile);
+          if (pathTiles && pathTiles.length > 0){
+            e.path = pathTiles.map(p => [p[0]*TILE + TILE/2, p[1]*TILE + TILE/2]);
           } else {
             e.path = null;
-            // wander a bit
             e.dir += (Math.random()-0.5) * 1.2;
           }
-          e.pathTimer = 1.0 + Math.random()*1.4;
+          e.pathTimer = 0.9 + Math.random()*1.6;
         }
-        // follow path if present
-        if (e.path && e.path.length>0){
+        if (e.path && e.path.length > 0){
           const target = e.path[0];
-          const pdx = target[0]-e.x, pdy = target[1]-e.y;
+          const pdx = target[0] - e.x, pdy = target[1] - e.y;
           const pd = Math.hypot(pdx,pdy);
           if (pd < 6) e.path.shift();
           else {
@@ -346,11 +335,10 @@
         }
       }
 
-      // basic collision with walls (push back)
+      // keep inside bounds & nudge out of walls
       if (mapAt(e.x, e.y) !== 0){
-        // try to nudge out to nearest free tile
-        e.x += (Math.random()-0.5)*6;
-        e.y += (Math.random()-0.5)*6;
+        e.x += (Math.random()-0.5)*8;
+        e.y += (Math.random()-0.5)*8;
       }
     }
   }
@@ -360,9 +348,7 @@
     for(let i=enemyBullets.length-1;i>=0;i--){
       const b = enemyBullets[i];
       b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
-      // collision with walls
       if (mapAt(b.x,b.y) !== 0) { enemyBullets.splice(i,1); continue; }
-      // collision with player
       const d = Math.hypot(b.x - player.x, b.y - player.y);
       if (d < player.radius + 6){
         player.health -= b.dmg;
@@ -373,7 +359,7 @@
     }
   }
 
-  // Player shooting (improved from earlier)
+  // Player shooting
   function tryFire(now){
     if (weapon.reloading) return;
     if (weapon.ammo <= 0) return;
@@ -383,13 +369,11 @@
     weapon.ammo -= 1;
     weapon.recoil += weapon.recoilPerShot;
     weapon.muzzleFlash = weapon.muzzleDuration;
-    // shot angle with spread+recoil
     const spread = weapon.spread + (weapon.recoil * 0.6);
     const r = (Math.random()-0.5) * spread;
     const shotAngle = player.angle + r;
     const wallHit = castRay(shotAngle);
     const maxDist = wallHit.dist;
-    // find enemy in front before wall
     const dx = Math.cos(shotAngle), dy = Math.sin(shotAngle);
     let hitEnemy = null, bestT = Infinity;
     for(const e of enemies){
@@ -403,15 +387,11 @@
     }
     if (hitEnemy){
       hitEnemy.hp -= 18 + Math.floor(Math.random()*6);
-      // small stagger
       hitEnemy.x += Math.cos(shotAngle) * 6;
       hitEnemy.y += Math.sin(shotAngle) * 6;
-      // tracer to enemy
       const hitX = player.x + dx*bestT, hitY = player.y + dy*bestT;
       weapon.tracers.push({x1:player.x,y1:player.y,x2:hitX,y2:hitY,t:weapon.tracerLifetime});
-      // check death immediately - scoring handled elsewhere in enemy loop
     } else {
-      // tracer to wall
       const hitX = player.x + dx*maxDist, hitY = player.y + dy*maxDist;
       weapon.tracers.push({x1:player.x,y1:player.y,x2:hitX,y2:hitY,t:weapon.tracerLifetime});
     }
@@ -422,21 +402,24 @@
     weapon.reloading = true; weapon.reloadStart = performance.now();
   }
 
-  // Spawning helper: spawn waves over time
+  // Spawning helper
   function waveTick(dt, now){
     if (waveState === 'waiting'){
-      // initial small delay then start first wave
       intermissionTimer -= dt;
       if (intermissionTimer <= 0) startNextWave();
     } else if (waveState === 'spawning'){
-      // spawn enemies at a comfortable pace
       intermissionTimer -= dt;
       if (intermissionTimer <= 0 && waveConfig.spawned < waveConfig.count){
         spawnEnemy(waveNumber);
         waveConfig.spawned++;
-        intermissionTimer = 0.6 + Math.random()*0.6;
+        intermissionTimer = 0.55 + Math.random()*0.6;
       }
       if (waveConfig.spawned >= waveConfig.count) waveState = 'active';
+      // safety: if nothing spawned after a few seconds spawn a couple
+      if (waveConfig.spawned === 0 && now % 5000 < 50){
+        spawnEnemy(waveNumber);
+        waveConfig.spawned++;
+      }
     } else if (waveState === 'active'){
       if (enemies.length === 0){
         onWaveCleared();
@@ -447,7 +430,7 @@
     }
   }
 
-  // Rendering loop
+  // Rendering & update loop
   let last = performance.now();
   function frame(now){
     const dt = Math.min(0.05, (now - last)/1000); last = now;
@@ -457,10 +440,9 @@
   }
 
   function update(dt, now){
-    // Player rotation
+    // Player rotation & movement
     if (keys['q'] || keys['arrowleft']) player.angle -= player.rotSpeed * dt;
     if (keys['e'] || keys['arrowright']) player.angle += player.rotSpeed * dt;
-    // Movement
     let moveX=0, moveY=0;
     const forward = (keys['w']?1:0) - (keys['s']?1:0);
     const strafe = (keys['d']?1:0) - (keys['a']?1:0);
@@ -473,8 +455,7 @@
     // Player firing
     if (keys[' ']) tryFire(performance.now());
 
-    // weapon decay & reload
-    weapon.tracers.forEach(t => {}); // kept for clarity
+    // Weapon decay & reload
     for (let i=weapon.tracers.length-1;i>=0;i--){ weapon.tracers[i].t -= dt; if (weapon.tracers[i].t<=0) weapon.tracers.splice(i,1); }
     if (weapon.muzzleFlash>0) weapon.muzzleFlash = Math.max(0, weapon.muzzleFlash - dt);
     weapon.recoil = Math.max(0, weapon.recoil - weapon.recoilRecover * dt);
@@ -489,26 +470,32 @@
     // Wave progression
     waveTick(dt, performance.now());
 
-    // Update overlay
+    // Update overlay text
     let nextIn = '—';
     if (waveState === 'spawning') nextIn = 'spawning...';
     else if (waveState === 'active') nextIn = 'in progress';
     else if (waveState === 'intermission') nextIn = Math.ceil(intermissionTimer)+'s';
     else if (waveState === 'waiting') nextIn = Math.ceil(intermissionTimer)+'s';
     biginfo.textContent = `Wave: ${waveNumber}  •  Next: ${nextIn}  •  Enemies: ${enemies.length}  •  Score: ${score}  •  Health: ${player.health}`;
-    // player death check
+
+    // death
     if (player.health <= 0){
-      // simple reset for now
+      // show a basic game-over and freeze game state until press R to restart
       player.health = 0;
-      // show game over overlay (simple)
-      // stop game ticks but allow restart by pressing R
+      // freeze by removing all keys effects and stop spawning; allow reload R to revive
+      // We'll implement a simple restart on R press:
+      if (keys['r']) {
+        // restart
+        player.x = TILE*1.5; player.y = TILE*1.5; player.health = 100;
+        enemies = []; enemyBullets = []; score = 0; waveNumber = 0; waveState = 'waiting'; intermissionTimer = 1.2;
+        weapon.ammo = weapon.maxAmmo; weapon.reloading = false;
+      }
     }
 
-    // spawn initial waiting if waveNumber==0
-    if (waveNumber===0 && waveState==='waiting' && intermissionTimer===0) intermissionTimer=1.2;
+    // ensure first wave starts
+    if (waveNumber===0 && waveState==='waiting' && intermissionTimer===0) intermissionTimer=1.4;
   }
 
-  // Rendering
   function render(){
     ctx.clearRect(0,0,W,H);
     // ceiling & floor
@@ -559,12 +546,8 @@
       ctx.restore();
     }
 
-    // Draw enemy bullets as small yellow dots/projectiles
+    // Draw enemy bullets as small dots projected roughly
     for(const b of enemyBullets){
-      // simple projection: draw as overlay line from center in the bullet direction scaled
-      // but we will draw actual world positions as small circles
-      // compute screen projection only for minimap; draw as small overlay near center for impact visualization
-      // simpler: draw bullets as small circles in world-to-screen approximate 2D overlay using relative angle
       const dx = b.x - player.x, dy = b.y - player.y;
       const dist = Math.hypot(dx,dy);
       const ang = Math.atan2(dy,dx);
@@ -573,7 +556,6 @@
       const rel = Math.tan(da) / Math.tan(HALF_FOV);
       const sx = (W/2) + rel * (W/2);
       const sy = H/2;
-      // place a small dot relative to distance
       const dotSize = Math.max(2, 6 - dist/140);
       ctx.fillStyle = 'rgba(255,230,140,0.95)';
       ctx.beginPath(); ctx.arc(sx, sy, dotSize, 0, Math.PI*2); ctx.fill();
@@ -591,7 +573,6 @@
       ctx.beginPath(); ctx.moveTo(W/2, H/2); ctx.lineTo(W/2 + dx*len, H/2 + dy*len); ctx.stroke();
     }
 
-    // Crosshair (affected by recoil)
     const recoilFactor = Math.min(2.2, 1 + weapon.recoil*2.2);
     ctx.fillStyle = '#fff';
     ctx.fillRect(W/2 - 1, H/2 - 9*recoilFactor, 2, 18*recoilFactor);
@@ -609,11 +590,9 @@
     const recoilPx = -weapon.recoil * 28;
     ctx.drawImage(gunCanvas, gx + recoilPx, gy, gunW, gunH);
 
-    // HUD text
     ctx.fillStyle = '#f3f3f3'; ctx.font = '16px monospace';
     ctx.fillText(`Ammo: ${weapon.ammo}/${weapon.maxAmmo}`, 18, H - 18);
 
-    // Minimap
     if (showMap) drawMiniMap();
   }
 
@@ -629,16 +608,11 @@
       if (v===0) ctx.fillStyle='#2a2a2a'; else if (v===1) ctx.fillStyle='#8f6a4a'; else if (v===2) ctx.fillStyle='#4b8a9a'; else ctx.fillStyle='#7a4b9a';
       ctx.fillRect(mmX + c*TILE*mmScale, mmY + r*TILE*mmScale, TILE*mmScale, TILE*mmScale);
     }
-    // player
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(mmX + player.x*mmScale, mmY + player.y*mmScale, 4,0,Math.PI*2); ctx.fill();
-    // facing
     ctx.strokeStyle='#fff'; ctx.beginPath(); ctx.moveTo(mmX + player.x*mmScale, mmY + player.y*mmScale);
     ctx.lineTo(mmX + (player.x + Math.cos(player.angle)*20)*mmScale, mmY + (player.y + Math.sin(player.angle)*20)*mmScale); ctx.stroke();
-    // enemies
     for(const e of enemies){ if(e.hp<=0) continue; ctx.fillStyle='#d14a4a'; ctx.beginPath(); ctx.arc(mmX + e.x*mmScale, mmY + e.y*mmScale, 5,0,Math.PI*2); ctx.fill(); }
-    // bullets
     for(const b of enemyBullets){ ctx.fillStyle='yellow'; ctx.beginPath(); ctx.arc(mmX + b.x*mmScale, mmY + b.y*mmScale, 2,0,Math.PI*2); ctx.fill(); }
-    // wave label
     ctx.fillStyle='#cfcfcf'; ctx.font='11px sans-serif'; const sizes=['Small','Medium','Large']; ctx.fillText(`Map: ${sizes[minimapModeIndex]} (N)`, mmX, mmY + mmH + 18);
   }
 
