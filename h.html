@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Blackjack with Points & Multiple Rounds</title>
+<title>Blackjack with Animations</title>
 <style>
   body {
     font-family: Arial, sans-serif;
@@ -28,6 +28,7 @@
     display: flex;
     justify-content: center;
     margin: 10px 0 20px;
+    min-height: 100px;
   }
   .card {
     background: white;
@@ -41,7 +42,50 @@
     margin: 0 5px;
     box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
     user-select: none;
+
+    /* Animation setup */
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.6s;
+    cursor: default;
   }
+  /* Flip card styles */
+  .card.back {
+    background: #444;
+    color: transparent;
+    cursor: default;
+  }
+  .card.back::after {
+    content: "?";
+    color: black;
+    font-size: 40px;
+    position: absolute;
+    top: 20px;
+    left: 18px;
+    transform: rotateY(0deg);
+    backface-visibility: hidden;
+  }
+  .card.flipped {
+    transform: rotateY(180deg);
+  }
+  .card.back.flipped {
+    color: black;
+  }
+  /* Slide-in animation */
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-40px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .card.slide-in {
+    animation: slideIn 0.5s ease forwards;
+  }
+
   button {
     background: #388e3c;
     color: white;
@@ -51,9 +95,11 @@
     font-size: 16px;
     border-radius: 5px;
     cursor: pointer;
+    transition: transform 0.2s ease;
   }
   button:hover:not(:disabled) {
     background: #2e7d32;
+    transform: scale(1.05);
   }
   button:disabled {
     background: #555;
@@ -63,6 +109,11 @@
     margin-top: 20px;
     font-size: 20px;
     min-height: 28px;
+    opacity: 0;
+    transition: opacity 0.7s ease;
+  }
+  #message.visible {
+    opacity: 1;
   }
   #status {
     margin-bottom: 15px;
@@ -163,41 +214,70 @@
     return score;
   }
 
+  // Animate cards and render them
   function renderCards() {
     dealerCardsDiv.innerHTML = '';
     playerCardsDiv.innerHTML = '';
 
+    // Dealer cards
     dealerHand.forEach((card, i) => {
       const cardDiv = document.createElement('div');
       cardDiv.classList.add('card');
+      cardDiv.classList.add('slide-in');
 
-      // Show only the first dealer card if game is ongoing, hide the second card
       if (!gameOver && i === 1) {
-        cardDiv.textContent = '?';
-        cardDiv.style.color = 'black';
+        // Hidden card - flip animation setup
+        cardDiv.classList.add('back');
       } else {
         cardDiv.textContent = card.value + card.suit;
         cardDiv.style.color = (card.suit === '♥' || card.suit === '♦') ? 'red' : 'black';
       }
+
       dealerCardsDiv.appendChild(cardDiv);
+
+      // Delay the slide-in animation per card for nicer effect
+      cardDiv.style.animationDelay = (i * 0.1) + 's';
     });
 
-    playerHand.forEach(card => {
+    // Player cards
+    playerHand.forEach((card, i) => {
       const cardDiv = document.createElement('div');
-      cardDiv.classList.add('card');
+      cardDiv.classList.add('card', 'slide-in');
       cardDiv.textContent = card.value + card.suit;
       cardDiv.style.color = (card.suit === '♥' || card.suit === '♦') ? 'red' : 'black';
       playerCardsDiv.appendChild(cardDiv);
+      cardDiv.style.animationDelay = (i * 0.1) + 's';
     });
 
-    // Dealer score shows '?' if game is ongoing; full score otherwise
     dealerScoreSpan.textContent = gameOver ? calculateScore(dealerHand) : '?';
-
     playerScoreSpan.textContent = calculateScore(playerHand);
   }
 
+  // Flip dealer's hidden card when round ends
+  function flipDealerCard() {
+    const dealerCards = dealerCardsDiv.querySelectorAll('.card');
+    if (dealerCards.length < 2) return; // safety check
+
+    const hiddenCard = dealerCards[1];
+    hiddenCard.classList.remove('back');
+    hiddenCard.textContent = dealerHand[1].value + dealerHand[1].suit;
+    hiddenCard.style.color = (dealerHand[1].suit === '♥' || dealerHand[1].suit === '♦') ? 'red' : 'black';
+
+    // Add flipping animation
+    hiddenCard.style.transform = 'rotateY(0deg)';
+  }
+
+  function showMessage(text) {
+    messageDiv.textContent = text;
+    messageDiv.classList.add('visible');
+  }
+
+  function clearMessage() {
+    messageDiv.textContent = '';
+    messageDiv.classList.remove('visible');
+  }
+
   function dealInitial() {
-    // Reshuffle if deck has fewer than 15 cards for safety
     if (deck.length < 15) {
       createDeck();
       shuffleDeck();
@@ -205,25 +285,26 @@
     playerHand = [deck.pop(), deck.pop()];
     dealerHand = [deck.pop(), deck.pop()];
     gameOver = false;
-    messageDiv.textContent = '';
+    clearMessage();
     renderCards();
     btnHit.disabled = false;
     btnStand.disabled = false;
     btnNew.disabled = true;
 
-    // Check immediate blackjack for player or dealer
+    // Check immediate blackjack
     const playerScore = calculateScore(playerHand);
     const dealerScore = calculateScore(dealerHand);
 
     if (playerScore === 21 && dealerScore === 21) {
-      messageDiv.textContent = "Both have Blackjack! It's a tie!";
+      showMessage("Both have Blackjack! It's a tie!");
       gameOver = true;
       btnHit.disabled = true;
       btnStand.disabled = true;
       btnNew.disabled = false;
       renderCards();
+      flipDealerCard();
     } else if (playerScore === 21) {
-      messageDiv.textContent = "Blackjack! You win!";
+      showMessage("Blackjack! You win!");
       points++;
       pointsSpan.textContent = points;
       gameOver = true;
@@ -231,22 +312,25 @@
       btnStand.disabled = true;
       btnNew.disabled = false;
       renderCards();
+      flipDealerCard();
     } else if (dealerScore === 21) {
-      messageDiv.textContent = "Dealer has Blackjack! You lose!";
+      showMessage("Dealer has Blackjack! You lose!");
       gameOver = true;
       btnHit.disabled = true;
       btnStand.disabled = true;
       btnNew.disabled = false;
       renderCards();
+      flipDealerCard();
     }
   }
 
   function checkForEnd() {
     const playerScore = calculateScore(playerHand);
     if (playerScore > 21) {
-      messageDiv.textContent = 'You busted! Dealer wins.';
+      showMessage('You busted! Dealer wins.');
       gameOver = true;
       renderCards();
+      flipDealerCard();
       btnHit.disabled = true;
       btnStand.disabled = true;
       btnNew.disabled = false;
@@ -258,7 +342,7 @@
   function dealerTurn() {
     let dealerScore = calculateScore(dealerHand);
     while (dealerScore < 17) {
-      if(deck.length === 0) break; // safety if deck empty
+      if(deck.length === 0) break;
       dealerHand.push(deck.pop());
       dealerScore = calculateScore(dealerHand);
     }
@@ -268,16 +352,18 @@
     const playerScore = calculateScore(playerHand);
     const dealerScore = calculateScore(dealerHand);
 
+    flipDealerCard();
+
     if (dealerScore > 21) {
-      messageDiv.textContent = 'Dealer busted! You win!';
+      showMessage('Dealer busted! You win!');
       points++;
     } else if (playerScore > dealerScore) {
-      messageDiv.textContent = 'You win!';
+      showMessage('You win!');
       points++;
     } else if (playerScore < dealerScore) {
-      messageDiv.textContent = 'Dealer wins!';
+      showMessage('Dealer wins!');
     } else {
-      messageDiv.textContent = 'It\'s a tie!';
+      showMessage('It\'s a tie!');
     }
     pointsSpan.textContent = points;
   }
@@ -285,7 +371,7 @@
   btnHit.addEventListener('click', () => {
     if (gameOver) return;
     if(deck.length === 0) {
-      messageDiv.textContent = "Deck is empty, reshuffling...";
+      showMessage("Deck is empty, reshuffling...");
       createDeck();
       shuffleDeck();
       return;
