@@ -80,7 +80,7 @@
   </div>
 
   <div>
-    <h2>Dealer's Hand (<span id="dealer-score">0</span>)</h2>
+    <h2>Dealer's Hand (<span id="dealer-score">?</span>)</h2>
     <div id="dealer-cards" class="cards"></div>
   </div>
 
@@ -128,7 +128,7 @@
     deck = [];
     for (let suit of suits) {
       for (let value of values) {
-        deck.push({suit, value});
+        deck.push({ suit, value });
       }
     }
   }
@@ -171,8 +171,8 @@
       const cardDiv = document.createElement('div');
       cardDiv.classList.add('card');
 
-      // Hide dealer's second card if game not over
-      if (i === 1 && !gameOver) {
+      // Show only the first dealer card if game is ongoing, hide the second card
+      if (!gameOver && i === 1) {
         cardDiv.textContent = '?';
         cardDiv.style.color = 'black';
       } else {
@@ -190,12 +190,15 @@
       playerCardsDiv.appendChild(cardDiv);
     });
 
+    // Dealer score shows '?' if game is ongoing; full score otherwise
     dealerScoreSpan.textContent = gameOver ? calculateScore(dealerHand) : '?';
+
     playerScoreSpan.textContent = calculateScore(playerHand);
   }
 
   function dealInitial() {
-    if (deck.length < 10) { // reshuffle if deck too low
+    // Reshuffle if deck has fewer than 15 cards for safety
+    if (deck.length < 15) {
       createDeck();
       shuffleDeck();
     }
@@ -207,6 +210,35 @@
     btnHit.disabled = false;
     btnStand.disabled = false;
     btnNew.disabled = true;
+
+    // Check immediate blackjack for player or dealer
+    const playerScore = calculateScore(playerHand);
+    const dealerScore = calculateScore(dealerHand);
+
+    if (playerScore === 21 && dealerScore === 21) {
+      messageDiv.textContent = "Both have Blackjack! It's a tie!";
+      gameOver = true;
+      btnHit.disabled = true;
+      btnStand.disabled = true;
+      btnNew.disabled = false;
+      renderCards();
+    } else if (playerScore === 21) {
+      messageDiv.textContent = "Blackjack! You win!";
+      points++;
+      pointsSpan.textContent = points;
+      gameOver = true;
+      btnHit.disabled = true;
+      btnStand.disabled = true;
+      btnNew.disabled = false;
+      renderCards();
+    } else if (dealerScore === 21) {
+      messageDiv.textContent = "Dealer has Blackjack! You lose!";
+      gameOver = true;
+      btnHit.disabled = true;
+      btnStand.disabled = true;
+      btnNew.disabled = false;
+      renderCards();
+    }
   }
 
   function checkForEnd() {
@@ -226,6 +258,7 @@
   function dealerTurn() {
     let dealerScore = calculateScore(dealerHand);
     while (dealerScore < 17) {
+      if(deck.length === 0) break; // safety if deck empty
       dealerHand.push(deck.pop());
       dealerScore = calculateScore(dealerHand);
     }
@@ -251,6 +284,12 @@
 
   btnHit.addEventListener('click', () => {
     if (gameOver) return;
+    if(deck.length === 0) {
+      messageDiv.textContent = "Deck is empty, reshuffling...";
+      createDeck();
+      shuffleDeck();
+      return;
+    }
     playerHand.push(deck.pop());
     renderCards();
     if (checkForEnd()) {
@@ -283,7 +322,7 @@
     dealInitial();
   });
 
-  // Start the first game automatically
+  // Initialize deck and start game
   createDeck();
   shuffleDeck();
   dealInitial();
